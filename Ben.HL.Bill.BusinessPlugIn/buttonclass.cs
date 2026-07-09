@@ -75,7 +75,13 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 case "tbBtnToRelease":
                     ExecuteToRelease();
                     break;
+                case "tbBtnToStart":
+                    ExecuteToRelease();
+                    break;
                 case "tbBtnUndoToPlanConfirm":
+                    ExecuteUndoToPlanConfirm();
+                    break;
+                case "tbBtnUndoToPlan":
                     ExecuteUndoToPlanConfirm();
                     break;
                 default:
@@ -83,8 +89,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
 
             // 取消默认事件处理，由 BeforeDoOperation 来控制是否执行操作
-            e.Cancel = true;
-            return;
+            //e.Cancel = true;
+            //return;
         }
 
         /// <summary>
@@ -282,7 +288,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 {
                     using (Stream responseStream = response.GetResponseStream())
                     {
-                        using (StreamReader streamReader = new StreamReader(responseStream, Encoding.UTF8))
+                        using (StreamReader streamReader = new StreamReader(responseStream, Encoding.UTF8)) 
                         {
                             string responseData = streamReader.ReadToEnd();
 
@@ -307,17 +313,17 @@ namespace Ben.HL.Bill.BusinessPlugIn
                                 // }
 
                                 // 如果是对象且有记录
-                                // if (result.data != null && result.data.Count > 0)
-                                // {
-                                //     hasProcessOrder = true;
-                                // }
+                                 if (result.data != null && result.data.Count > 0)
+                                 {
+                                     hasProcessOrder = true;
+                                 }
                             }
 
                             if (hasProcessOrder)
                             {
                                 _needBlockOperation = true;
                                 _errorMessage = "MES中已存在工序订单，不允许反执行";
-                                this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
+                                //this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
                                 return;
                             }
 
