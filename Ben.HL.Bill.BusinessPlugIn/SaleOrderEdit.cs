@@ -10,11 +10,13 @@ using Kingdee.BOS.Core.SqlBuilder;
 using Kingdee.BOS.Core.Metadata;
 using System.ComponentModel;
 using Kingdee.BOS.App.Data;
+using Kingdee.BOS.ServiceHelper;
+using Kingdee.BOS.Core.DynamicForm;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
-    //[Kingdee.BOS.Util.HotUpdate]
-    [Description("获取实际金额-销售订单表单插件")]
+    [Kingdee.BOS.Util.HotUpdate]
+    [Description("获取实际金额+库存组织校验-销售订单表单插件")]
     public class SaleOrderEdit : AbstractBillPlugIn
     {
         /// <summary>
@@ -143,11 +145,13 @@ namespace Ben.HL.Bill.BusinessPlugIn
         /// <param name="e"></param>
         public override void BeforeDoOperation(BeforeDoOperationEventArgs e)
         {
+            base.BeforeDoOperation(e);
             switch (e.Operation.FormOperation.Operation.ToUpperInvariant())
             {
                 //case "SAVE": 表单定义的事件都可以在这里执行，需要通过事件的代码[大写]区分不同事件
                 //break;
                 case "":
+                    //ValidateStockOrgConsistency();
                     break;
                 default:
                     break;
@@ -166,7 +170,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
             {
                 //case "SAVE": 表单定义的事件都可以在这里执行，需要通过事件的代码[大写]区分不同事件
                 //break;
-                case "":
+                case "SAVE":
+                    ValidateStockOrgConsistency();
                     break;
                 default:
                     break;
@@ -188,6 +193,115 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
             DynamicObjectCollection dyDatas = Kingdee.BOS.ServiceHelper.QueryServiceHelper.GetDynamicObjectCollection(this.Context, paramCatalog);
             return dyDatas;
+        }
+
+
+        /// <summary>
+        /// 验证销售订单明细的库存组织与物料组织是否一致
+        /// </summary>
+        private void ValidateStockOrgConsistency()
+        {
+            // 获取销售订单明细数据
+            DynamicObjectCollection saleOrderEntry = this.Model.DataObject["SaleOrderEntry"] as DynamicObjectCollection;
+
+            if (saleOrderEntry == null || saleOrderEntry.Count == 0)
+                return;
+
+            // 用于存储错误信息
+            List<string> errorMessages = new List<string>();
+
+            // 获取物料ID列表，用于批量查询
+            List<string> materialIds = new List<string>();
+            Dictionary<string, string> materialOrgCache = new Dictionary<string, string>();
+
+            // 先收集所有物料ID
+            foreach (DynamicObject entry in saleOrderEntry)
+            {
+                DynamicObject material = entry["MaterialId"] as DynamicObject;
+                if (material == null) continue;
+
+                string materialId = material["Id"]?.ToString();
+                if (!string.IsNullOrEmpty(materialId) && !materialIds.Contains(materialId))
+                {
+                    materialIds.Add(materialId);
+                }
+            }
+
+            // 批量查询物料的组织字段
+            if (materialIds.Count > 0)
+            {
+                // 构建SQL查询语句
+                string ids = string.Join(",", materialIds);
+                string sql = string.Format(@"SELECT FmaterialID, F_BHD_ORGID_9ZU 
+                                            FROM T_BD_MATERIAL 
+                                            WHERE FmaterialID IN ({0})", ids);
+
+                // 使用DBUtils执行查询
+                DynamicObjectCollection materialList = DBUtils.ExecuteDynamicObject(this.Context, sql);
+
+                foreach (DynamicObject material in materialList)
+                {
+                    string fid = material["FmaterialID"]?.ToString();
+                    string orgId = material["F_BHD_ORGID_9ZU"]?.ToString();
+                    if (!string.IsNullOrEmpty(fid) && !string.IsNullOrEmpty(orgId))
+                    {
+                        materialOrgCache[fid] = orgId;
+                    }
+                }
+            }
+
+            // 遍历明细行进行验证
+            foreach (DynamicObject entry in saleOrderEntry)
+            {
+                // 获取当前行的库存组织
+                DynamicObject stockOrg = entry["StockOrgId"] as DynamicObject;
+                if (stockOrg == null) continue;
+
+                // 获取库存组织的Id
+                string stockOrgId = stockOrg["Id"]?.ToString();
+                if (string.IsNullOrEmpty(stockOrgId)) continue;
+
+                // 获取物料信息
+                DynamicObject material = entry["MaterialId"] as DynamicObject;
+                if (material == null) continue;
+
+                string materialId = material["Id"]?.ToString();
+                if (string.IsNullOrEmpty(materialId)) continue;
+
+                string materialOrgId;
+
+                // 从缓存中获取物料组织ID
+                if (!materialOrgCache.TryGetValue(materialId, out materialOrgId))
+                {
+                    // 如果查询不到物料组织，跳过该行
+                    continue;
+                }
+
+                // 比较库存组织ID和物料组织ID是否一致
+                if (stockOrgId != materialOrgId)
+                {
+                    // 获取行号
+                    int? seq = entry["Seq"] as int?;
+                    string rowInfo = seq.HasValue ? string.Format("第{0}行", seq.Value) : "某行";
+
+                    // 获取物料编码和名称，便于定位
+                    string materialNumber = material["Number"]?.ToString() ?? "";
+                    string materialName = material["Name"]?.ToString() ?? "";
+
+                    errorMessages.Add(string.Format("{0}（物料：{1} {2}）：销售订单库存组织与物料默认组织不符",
+                        rowInfo, materialNumber, materialName));
+                }
+            }
+
+            // 如果有错误信息，显示提示（不拦截操作）
+            if (errorMessages.Count > 0)
+            {
+                string message = string.Join(Environment.NewLine, errorMessages);
+                // 使用提示消息，不抛出异常
+                this.View.ShowMessage(message, MessageBoxType.Error);
+                // 或者使用更简单的方式
+                // this.View.ShowMessage(message);
+            }
         }
     }
 

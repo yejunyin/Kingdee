@@ -78,7 +78,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="buttonclass.cs" />
-    <Compile Include="Class1.cs" />
+    <Compile Include="SaleOrderEdit.cs" />
     <Compile Include="SimulateQuotationEdit.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
