@@ -21,7 +21,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             base.DataChanged(e);
 
             // 1. 检查改变的字段是否为物料字段（请根据实际字段标识调整）
-            if (e.Field.Key.Equals("FMaterialId", StringComparison.OrdinalIgnoreCase))
+            if (e.Field.Key.Equals("F_BHD_MaterialId", StringComparison.OrdinalIgnoreCase))
             {
                 int rowIndex = e.Row;
 
@@ -31,9 +31,9 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 long materialId = Convert.ToInt64(materialObj["Id"]);
 
                 // 获取表头：客户、币别、单据日期
-                DynamicObject custObj = this.View.Model.GetValue("FCustomerId") as DynamicObject;
-                DynamicObject currObj = this.View.Model.GetValue("FCurrencyId") as DynamicObject;
-                DateTime billDate = Convert.ToDateTime(this.View.Model.GetValue("FDate"));
+                DynamicObject custObj = this.View.Model.GetValue("F_BHD_CusId") as DynamicObject;
+                DynamicObject currObj = this.View.Model.GetValue("F_BHD_CurrencyId") as DynamicObject;
+                DateTime billDate = Convert.ToDateTime(this.View.Model.GetValue("F_BHD_Date"));
 
                 if (custObj == null || currObj == null) return;
 
@@ -95,8 +95,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                   AND H.FCURRENCYID = {0}
                   AND E.FMATERIALID = {1}
                   AND C.FCUSTID = {2}
-                  AND H.EFFECTIVEDATE <= '{3}' 
-                  AND H.EXPIRYDATE >= '{3}'
+                  AND H.FEFFECTIVEDATE <= '{3}' 
+                  AND H.FEXPIRYDATE >= '{3}'
                 ORDER BY H.FAPPROVEDATE DESC",
                 currencyId, materialId, customerId, dateStr);
 
@@ -126,8 +126,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                   AND H.FCURRENCYID = {0}
                   AND E.FMATERIALID = {1}
                   AND CT.FCUSTTYPEID = {2}
-                  AND H.EFFECTIVEDATE <= '{3}' 
-                  AND H.EXPIRYDATE >= '{3}'
+                  AND H.FEFFECTIVEDATE <= '{3}' 
+                  AND H.FEXPIRYDATE >= '{3}'
                 ORDER BY H.FAPPROVEDATE DESC",
                 currencyId, materialId, custTypeId, dateStr);
 
