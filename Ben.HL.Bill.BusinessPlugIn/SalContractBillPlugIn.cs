@@ -20,25 +20,25 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.DataChanged(e);
 
-            // 1. 检查改变的字段是否为物料字段（请根据实际字段标识调整）
+            // 1. 检查改变的字段是否为物料字段
             if (e.Field.Key.Equals("F_BHD_MaterialId", StringComparison.OrdinalIgnoreCase))
             {
                 int rowIndex = e.Row;
 
-                // 获取物料ID
-                DynamicObject materialObj = e.NewValue as DynamicObject;
-                if (materialObj == null) return;
-                long materialId = Convert.ToInt64(materialObj["Id"]);
+                // 修正点 1：获取物料 ID（直接转换 e.NewValue，兼顾 DynamicObject 与 long 类型）
+                long materialId = Convert.ToInt64(e.NewValue);
+                if (materialId <= 0) return;
 
-                // 获取表头：客户、币别、单据日期
+                // 修正点 2：获取表头数据（基础资料建议取主键值或直接强转对象）
                 DynamicObject custObj = this.View.Model.GetValue("F_BHD_CusId") as DynamicObject;
                 DynamicObject currObj = this.View.Model.GetValue("F_BHD_CurrencyId") as DynamicObject;
-                DateTime billDate = Convert.ToDateTime(this.View.Model.GetValue("F_BHD_Date"));
+                object billDateObj = this.View.Model.GetValue("F_BHD_Date");
 
-                if (custObj == null || currObj == null) return;
+                if (custObj == null || currObj == null || billDateObj == null) return;
 
                 long customerId = Convert.ToInt64(custObj["Id"]);
                 long currencyId = Convert.ToInt64(currObj["Id"]);
+                DateTime billDate = Convert.ToDateTime(billDateObj);
 
                 // 2. 按优先级匹配获取价格 (P1 -> P2)
                 decimal price = GetSalesPrice(customerId, currencyId, materialId, billDate);
@@ -47,7 +47,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 this.View.Model.SetValue("FSysPrice", price, rowIndex);
                 this.View.Model.SetValue("F_BHD_ConSalesPrice", price, rowIndex);
 
-                // 刷新对应单据体行（请将 FEntity 替换为实际的单据体Key）
+                // 刷新对应单据体行（确保 FEntity 替换为实际单据体标识）
                 this.View.UpdateView("FEntity", rowIndex);
             }
         }
@@ -65,8 +65,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
 
             // P2 优先级: 客户类别 + 币别
-            long custTypeId = GetCustomerTypeId(customerId);
-            if (custTypeId > 0)
+            string custTypeId = GetCustomerTypeId(customerId);
+            if (!string.IsNullOrEmpty(custTypeId))
             {
                 decimal priceP2 = QueryPriceByCustType(custTypeId, currencyId, materialId, billDate);
                 if (priceP2 > 0)
@@ -112,7 +112,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         /// <summary>
         /// P2: 拼装 SQL 匹配【客户类别 + 币别】
         /// </summary>
-        private decimal QueryPriceByCustType(long custTypeId, long currencyId, long materialId, DateTime billDate)
+        private decimal QueryPriceByCustType(string custTypeId, long currencyId, long materialId, DateTime billDate)
         {
             string dateStr = billDate.ToString("yyyy-MM-dd");
 
@@ -125,7 +125,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                   AND H.FForbidStatus = 'A'
                   AND H.FCURRENCYID = {0}
                   AND E.FMATERIALID = {1}
-                  AND CT.FCUSTTYPEID = {2}
+                  AND CT.FCUSTTYPEID = '{2}'
                   AND H.FEFFECTIVEDATE <= '{3}' 
                   AND H.FEXPIRYDATE >= '{3}'
                 ORDER BY H.FAPPROVEDATE DESC",
@@ -141,19 +141,19 @@ namespace Ben.HL.Bill.BusinessPlugIn
         }
 
         /// <summary>
-        /// 查询客户档案中的客户类别ID
+        /// 查询客户档案中的客户类别ID (GUID 格式字符串)
         /// </summary>
-        private long GetCustomerTypeId(long customerId)
+        private string GetCustomerTypeId(long customerId)
         {
             string sql = string.Format("SELECT FCUSTTYPEID FROM T_BD_CUSTOMER WHERE FCUSTID = {0}", customerId);
 
             DynamicObjectCollection dt = DBServiceHelper.ExecuteDynamicObject(this.Context, sql);
             if (dt != null && dt.Count > 0)
             {
-                return Convert.ToInt64(dt[0]["FCUSTTYPEID"]);
+                return Convert.ToString(dt[0]["FCUSTTYPEID"]);
             }
 
-            return 0;
+            return string.Empty;
         }
     }
 }
