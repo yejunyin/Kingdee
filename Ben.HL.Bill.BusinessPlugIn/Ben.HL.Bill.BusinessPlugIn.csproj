@@ -78,6 +78,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="buttonclass.cs" />
+    <Compile Include="PushReceiveBillToWMS.cs" />
     <Compile Include="SalContractBillPlugIn.cs" />
     <Compile Include="SaleOrderEdit.cs" />
     <Compile Include="SimulateQuotationEdit.cs" />
