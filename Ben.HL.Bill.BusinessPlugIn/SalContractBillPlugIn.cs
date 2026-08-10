@@ -86,18 +86,19 @@ namespace Ben.HL.Bill.BusinessPlugIn
             string dateStr = billDate.ToString("yyyy-MM-dd");
 
             string sql = string.Format(@"
-                SELECT TOP 1 E.FPRICE 
+                SELECT TOP 1 
+                (E.FPRICE / ISNULL(NULLIF(rate.FEXCHANGERATE, 0), 1)) AS FPRICE
                 FROM T_SAL_PRICELIST H
                 INNER JOIN T_SAL_PRICELISTENTRY E ON H.FID = E.FID
                 INNER JOIN T_SAL_APPLYCUSTOMER C ON H.FID = C.FID
+                left JOIN t_bd_rate rate ON rate.fcyforid ={0}
                 WHERE H.FDOCUMENTSTATUS = 'C' 
                   AND H.FForbidStatus = 'A'
-                  AND H.FCURRENCYID = {0}
                   AND E.FMATERIALID = {1}
                   AND C.FCUSTID = {2}
                   AND H.FEFFECTIVEDATE <= '{3}' 
                   AND H.FEXPIRYDATE >= '{3}'
-                ORDER BY H.FAPPROVEDATE DESC",
+                ORDER BY H.FAPPROVEDATE DESC, rate.FBEGDATE DESC",
                 currencyId, materialId, customerId, dateStr);
 
             DynamicObjectCollection dt = DBServiceHelper.ExecuteDynamicObject(this.Context, sql);
@@ -117,18 +118,19 @@ namespace Ben.HL.Bill.BusinessPlugIn
             string dateStr = billDate.ToString("yyyy-MM-dd");
 
             string sql = string.Format(@"
-                SELECT TOP 1 E.FPRICE 
+                SELECT TOP 1 
+                (E.FPRICE / ISNULL(NULLIF(rate.FEXCHANGERATE, 0), 1)) AS FPRICE 
                 FROM T_SAL_PRICELIST H
                 INNER JOIN T_SAL_PRICELISTENTRY E ON H.FID = E.FID
                 INNER JOIN T_SAL_APPLYCUSTOMER CT ON H.FID = CT.FID
+                left JOIN t_bd_rate rate ON rate.fcyforid ={0}
                 WHERE H.FDOCUMENTSTATUS = 'C' 
                   AND H.FForbidStatus = 'A'
-                  AND H.FCURRENCYID = {0}
                   AND E.FMATERIALID = {1}
                   AND CT.FCUSTTYPEID = '{2}'
                   AND H.FEFFECTIVEDATE <= '{3}' 
                   AND H.FEXPIRYDATE >= '{3}'
-                ORDER BY H.FAPPROVEDATE DESC",
+                ORDER BY H.FAPPROVEDATE DESC, rate.FBEGDATE DESC",
                 currencyId, materialId, custTypeId, dateStr);
 
             DynamicObjectCollection dt = DBServiceHelper.ExecuteDynamicObject(this.Context, sql);

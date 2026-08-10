@@ -33,7 +33,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.AfterDoOperation(e);
 
-            // 判断是否为审核操作（OperationId = 0 通常代表审核）
+            // 判断是否为审核操作（通过操作名称判断）
             if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
             {
                 try
@@ -78,7 +78,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         private object BuildStandardApiRequest(DynamicObject billObj)
         {
             // 获取SRM单号（自定义字段）
-            string srmSourceNo = GetDynamicValue<string>(billObj, "F_HL_SRM_Source_NO");
+            string srmSourceNo = GetHeaderValue<string>("F_HL_SRM_Source_NO");
 
             // 获取单据类型，根据采购订单类型映射
             string billTypeNumber = GetBillTypeNumber(billObj);
@@ -86,25 +86,25 @@ namespace Ben.HL.Bill.BusinessPlugIn
             // 获取表头数据
             var header = new
             {
-                FID = GetDynamicValue<long>(billObj, "FID"),
+                FID = GetHeaderValue<long>("Id"),
                 F_HL_SRM_Source_NO = srmSourceNo,
                 FBillTypeID = new { FNUMBER = billTypeNumber },
-                FBusinessType = GetDynamicValue<string>(billObj, "FBusinessType"),
-                FDate = GetDateTimeString(billObj, "FDate"),
-                FStockOrgId = new { FNumber = GetDynamicValue<string>(billObj, "FStockOrgId.FNumber") },
-                FPurOrgId = new { FNumber = GetDynamicValue<string>(billObj, "FPurOrgId.FNumber") },
-                FSupplierId = new { FNumber = GetDynamicValue<string>(billObj, "FSupplierId.FNumber") },
-                FSupplyId = new { FNumber = GetDynamicValue<string>(billObj, "FSupplyId.FNumber") },
-                FOwnerTypeIdHead = GetDynamicValue<string>(billObj, "FOwnerTypeIdHead"),
-                FOwnerIdHead = new { FNumber = GetDynamicValue<string>(billObj, "FOwnerIdHead.FNumber") },
-                F_PVCE_Combo = GetDynamicValue<string>(billObj, "F_PVCE_Combo"),
-                FNote = GetDynamicValue<string>(billObj, "FNote"),
+                FBusinessType = GetHeaderValue<string>("BusinessType"),
+                FDate = GetDateTimeString("FDate"),
+                FStockOrgId = new { FNumber = GetBaseDataNumber("FStockOrgId") },
+                FPurOrgId = new { FNumber = GetBaseDataNumber("FPurOrgId") },
+                FSupplierId = new { FNumber = GetBaseDataNumber("FSupplierId") },
+                FSupplyId = new { FNumber = GetBaseDataNumber("FSupplyId") },
+                FOwnerTypeIdHead = GetHeaderValue<string>("FOwnerTypeIdHead"),
+                FOwnerIdHead = new { FNumber = GetBaseDataNumber("FOwnerIdHead") },
+                F_PVCE_Combo = GetHeaderValue<string>("F_PVCE_Combo"),
+                FNote = GetHeaderValue<string>("FNote"),
                 FinanceEntity = new
                 {
                     FEntryId = 0,
-                    FSettleOrgId = new { FNumber = GetDynamicValue<string>(billObj, "FinanceEntity.FSettleOrgId.FNumber") },
-                    FSettleCurrId = new { FNumber = GetDynamicValue<string>(billObj, "FinanceEntity.FSettleCurrId.FNumber") },
-                    FPricePoint = GetDynamicValue<string>(billObj, "FinanceEntity.FPricePoint")
+                    FSettleOrgId = new { FNumber = GetBaseDataNumber("FinanceEntity.FSettleOrgId") },
+                    FSettleCurrId = new { FNumber = GetBaseDataNumber("FinanceEntity.FSettleCurrId") },
+                    FPricePoint = GetHeaderValue<string>("FinanceEntity.FPricePoint")
                 },
                 FDetailEntity = BuildDetailEntityList(billObj)
             };
@@ -141,7 +141,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         private List<object> BuildDetailEntityList(DynamicObject billObj)
         {
             var detailList = new List<object>();
-            DynamicObjectCollection detailEntity = GetDynamicValue<DynamicObjectCollection>(billObj, "FDetailEntity");
+            DynamicObjectCollection detailEntity = this.Model.DataObject["PUR_ReceiveEntry"] as DynamicObjectCollection;
 
             if (detailEntity != null)
             {
@@ -154,24 +154,24 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     var detail = new
                     {
                         F_PVCE_HL_SRMSFEQ = seq++,
-                        FEntryID = GetDynamicValue<int>(row, "FEntryID"),
-                        FMaterialId = new { FNumber = GetDynamicValue<string>(row, "FMaterialId.FNumber") },
-                        FUnitId = new { FNumber = GetDynamicValue<string>(row, "FUnitId.FNumber") },
-                        FPriceUnitId = new { FNumber = GetDynamicValue<string>(row, "FPriceUnitId.FNumber") },
-                        FStockUnitID = new { FNumber = GetDynamicValue<string>(row, "FStockUnitID.FNumber") },
-                        FStockQty = GetDynamicValue<decimal>(row, "FStockQty"),
-                        FInStockQty = GetDynamicValue<decimal>(row, "FInStockQty"),
-                        FActlandQty = GetDynamicValue<decimal>(row, "FActlandQty"),
-                        FActReceiveQty = GetDynamicValue<decimal>(row, "FActReceiveQty"),
-                        FPriceUnitQty = GetDynamicValue<decimal>(row, "FPriceUnitQty"),
-                        FSrcBillNo = GetDynamicValue<string>(row, "FSrcBillNo"),
+                        FEntryID = GetEntryValue<int>(row, "Id"),
+                        FMaterialId = new { FNumber = GetEntryBaseDataNumber(row, "MaterialID") },
+                        FUnitId = new { FNumber = GetEntryBaseDataNumber(row, "FUnitId") },
+                        FPriceUnitId = new { FNumber = GetEntryBaseDataNumber(row, "FPriceUnitId") },
+                        FStockUnitID = new { FNumber = GetEntryBaseDataNumber(row, "FStockUnitID") },
+                        FStockQty = GetEntryValue<decimal>(row, "FStockQty"),
+                        FInStockQty = GetEntryValue<decimal>(row, "FInStockQty"),
+                        FActlandQty = GetEntryValue<decimal>(row, "FActlandQty"),
+                        FActReceiveQty = GetEntryValue<decimal>(row, "FActReceiveQty"),
+                        FPriceUnitQty = GetEntryValue<decimal>(row, "FPriceUnitQty"),
+                        FSrcBillNo = GetEntryValue<string>(row, "FSrcBillNo"),
                         FSrcFormId = "PUR_PurchaseOrder",  // 固定值
-                        FTAXPRICE = GetDynamicValue<decimal>(row, "FTAXPRICE"),
-                        FEntryTaxRate = GetDynamicValue<decimal>(row, "FEntryTaxRate"),
+                        FTAXPRICE = GetEntryValue<decimal>(row, "FTAXPRICE"),
+                        FEntryTaxRate = GetEntryValue<decimal>(row, "FEntryTaxRate"),
                         FAuxPropId = BuildAuxPropData(row),
-                        FMtoNo = GetDynamicValue<string>(row, "FMtoNo"),
-                        FSTOCKID = new { FNumber = GetDynamicValue<string>(row, "FSTOCKID.FNumber") },
-                        FDescription = GetDynamicValue<string>(row, "FDescription"),
+                        FMtoNo = GetEntryValue<string>(row, "FMtoNo"),
+                        FSTOCKID = new { FNumber = GetEntryBaseDataNumber(row, "FSTOCKID") },
+                        FDescription = GetEntryValue<string>(row, "FDescription"),
                         FDetailEntity_Link = linkData
                     };
 
@@ -208,7 +208,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
             foreach (string field in auxFields)
             {
-                string value = GetDynamicValue<string>(row, $"FAuxPropId.{field}.FNumber");
+                string value = GetEntryBaseDataNumber(row, $"FAuxPropId.{field}");
                 auxProp[field] = new { FNumber = value ?? "" };
             }
 
@@ -223,7 +223,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             var linkList = new List<object>();
 
             // 获取关联数据
-            var links = GetDynamicValue<DynamicObjectCollection>(row, "FDetailEntity_Link");
+            var links = row["FDetailEntity_Link"] as DynamicObjectCollection;
 
             if (links != null && links.Count > 0)
             {
@@ -231,14 +231,14 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 {
                     var linkData = new
                     {
-                        FDetailEntity_Link_FFlowId = GetDynamicValue<string>(link, "FFlowId") ?? "",
-                        FDetailEntity_Link_FFlowLineId = GetDynamicValue<string>(link, "FFlowLineId") ?? "",
-                        FDetailEntity_Link_FRuleId = "PUR_PurchaseOrder-PUR_ReceiveBill",
-                        FDetailEntity_Link_FSTableName = "t_PUR_POOrderEntry",
-                        FDetailEntity_Link_FSBillId = GetDynamicValue<long>(link, "FSBillId"),
-                        FDetailEntity_Link_FSId = GetDynamicValue<long>(link, "FSId"),
-                        FDetailEntity_Link_FBaseUnitQtyOld = GetDynamicValue<string>(link, "FBaseUnitQtyOld") ?? "0",
-                        FDetailEntity_Link_FBaseUnitQty = GetDynamicValue<string>(link, "FBaseUnitQty") ?? "0"
+                        FDetailEntity_Link_FFlowId = GetLinkValue<string>(link, "FlowId") ?? "",
+                        FDetailEntity_Link_FFlowLineId = GetLinkValue<string>(link, "FFlowLineId") ?? "",
+                        FDetailEntity_Link_FRuleId = "PUR_PurchaseOrder-PUR_ReceiveBill",  // 固定值
+                        FDetailEntity_Link_FSTableName = "t_PUR_POOrderEntry",  // 固定值
+                        FDetailEntity_Link_FSBillId = GetLinkValue<long>(link, "FSBillId"),
+                        FDetailEntity_Link_FSId = GetLinkValue<long>(link, "FSId"),
+                        FDetailEntity_Link_FBaseUnitQtyOld = GetLinkValue<string>(link, "FBaseUnitQtyOld") ?? "0",
+                        FDetailEntity_Link_FBaseUnitQty = GetLinkValue<string>(link, "FBaseUnitQty") ?? "0"
                     };
                     linkList.Add(linkData);
                 }
@@ -271,7 +271,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             try
             {
                 // 获取源采购订单类型
-                string poBillType = GetDynamicValue<string>(billObj, "FSrcBillTypeId.FNUMBER");
+                string poBillType = GetHeaderValue<string>("FSrcBillTypeId.FNUMBER");
 
                 if (!string.IsNullOrEmpty(poBillType))
                 {
@@ -294,50 +294,21 @@ namespace Ben.HL.Bill.BusinessPlugIn
         /// <summary>
         /// 获取日期时间字符串
         /// </summary>
-        private string GetDateTimeString(DynamicObject obj, string propertyName)
+        private string GetDateTimeString(string propertyName)
         {
-            DateTime? date = GetDynamicValue<DateTime?>(obj, propertyName);
+            DateTime? date = GetHeaderValue<DateTime?>(propertyName);
             return date?.ToString("yyyy-MM-dd HH:mm:ss") ?? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         }
 
         /// <summary>
-        /// 安全获取DynamicObject的属性值
+        /// 获取单据头字段值
         /// </summary>
-        private T GetDynamicValue<T>(DynamicObject obj, string propertyName)
+        private T GetHeaderValue<T>(string fieldName)
         {
-            if (obj == null) return default(T);
-
             try
             {
-                string[] pathParts = propertyName.Split('.');
-                object currentObj = obj;
-
-                foreach (string part in pathParts)
-                {
-                    if (currentObj == null) return default(T);
-
-                    // 使用 as 运算符代替模式匹配
-                    DynamicObject dynamicObj = currentObj as DynamicObject;
-                    if (dynamicObj != null)
-                    {
-                        currentObj = dynamicObj[part];
-                    }
-                    else
-                    {
-                        // 尝试通过反射获取属性
-                        var prop = currentObj.GetType().GetProperty(part);
-                        if (prop != null)
-                        {
-                            currentObj = prop.GetValue(currentObj);
-                        }
-                        else
-                        {
-                            return default(T);
-                        }
-                    }
-                }
-
-                if (currentObj == null) return default(T);
+                object value = this.Model.GetValue(fieldName);
+                if (value == null) return default(T);
 
                 Type targetType = typeof(T);
                 if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(Nullable<>))
@@ -345,12 +316,166 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     targetType = Nullable.GetUnderlyingType(targetType);
                 }
 
-                if (targetType != null && currentObj.GetType() != targetType)
+                if (targetType != null && value.GetType() != targetType)
                 {
-                    return (T)Convert.ChangeType(currentObj, targetType);
+                    return (T)Convert.ChangeType(value, targetType);
                 }
 
-                return (T)currentObj;
+                return (T)value;
+            }
+            catch
+            {
+                return default(T);
+            }
+        }
+
+        /// <summary>
+        /// 获取单据头基础资料字段的编码
+        /// </summary>
+        private string GetBaseDataNumber(string fieldName)
+        {
+            try
+            {
+                // 支持嵌套路径，如 "FinanceEntity.FSettleOrgId"
+                string[] pathParts = fieldName.Split('.');
+                object currentObj = this.Model.DataObject;
+
+                foreach (string part in pathParts)
+                {
+                    if (currentObj == null) return "";
+
+                    DynamicObject dynamicObj = currentObj as DynamicObject;
+                    if (dynamicObj != null)
+                    {
+                        currentObj = dynamicObj[part];
+                    }
+                    else
+                    {
+                        var prop = currentObj.GetType().GetProperty(part);
+                        if (prop != null)
+                        {
+                            currentObj = prop.GetValue(currentObj);
+                        }
+                        else
+                        {
+                            return "";
+                        }
+                    }
+                }
+
+                DynamicObject baseData = currentObj as DynamicObject;
+                if (baseData == null) return "";
+
+                object number = baseData["FNumber"];
+                return number?.ToString() ?? "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        /// <summary>
+        /// 获取分录字段的值
+        /// </summary>
+        private T GetEntryValue<T>(DynamicObject row, string fieldName)
+        {
+            try
+            {
+                object value = row[fieldName];
+                if (value == null) return default(T);
+
+                Type targetType = typeof(T);
+                if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(Nullable<>))
+                {
+                    targetType = Nullable.GetUnderlyingType(targetType);
+                }
+
+                if (targetType != null && value.GetType() != targetType)
+                {
+                    return (T)Convert.ChangeType(value, targetType);
+                }
+
+                return (T)value;
+            }
+            catch
+            {
+                return default(T);
+            }
+        }
+
+        /// <summary>
+        /// 获取分录基础资料字段的编码
+        /// </summary>
+        private string GetEntryBaseDataNumber(DynamicObject row, string fieldName)
+        {
+            try
+            {
+                // 支持嵌套路径，如 "FAuxPropId.FAUXPROPID__FF100001"
+                string[] pathParts = fieldName.Split('.');
+                object currentObj = row;
+
+                foreach (string part in pathParts)
+                {
+                    if (currentObj == null) return "";
+
+                    DynamicObject dynamicObj = currentObj as DynamicObject;
+                    if (dynamicObj != null)
+                    {
+                        currentObj = dynamicObj[part];
+                    }
+                    else
+                    {
+                        var prop = currentObj.GetType().GetProperty(part);
+                        if (prop != null)
+                        {
+                            currentObj = prop.GetValue(currentObj);
+                        }
+                        else
+                        {
+                            return "";
+                        }
+                    }
+                }
+
+                DynamicObject baseData = currentObj as DynamicObject;
+                if (baseData == null)
+                {
+                    // 如果已经是字符串，直接返回
+                    return currentObj?.ToString() ?? "";
+                }
+
+                object number = baseData["FNumber"];
+                return number?.ToString() ?? "";
+            }
+            catch
+            {
+                return "";
+            }
+        }
+
+        /// <summary>
+        /// 获取关联数据字段的值
+        /// </summary>
+        private T GetLinkValue<T>(DynamicObject row, string fieldName)
+        {
+            try
+            {
+                object value = row[fieldName];
+                if (value == null) return default(T);
+
+                Type targetType = typeof(T);
+                if (targetType.IsGenericType && targetType.GetGenericTypeDefinition() == typeof(Nullable<>))
+                {
+                    targetType = Nullable.GetUnderlyingType(targetType);
+                }
+
+                if (targetType != null && value.GetType() != targetType)
+                {
+                    return (T)Convert.ChangeType(value, targetType);
+                }
+
+                return (T)value;
             }
             catch
             {
