@@ -158,7 +158,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         FMaterialId = new { FNumber = GetEntryBaseDataNumber(row, "MaterialID") },
                         FUnitId = new { FNumber = GetEntryBaseDataNumber(row, "FUnitId") },
                         FPriceUnitId = new { FNumber = GetEntryBaseDataNumber(row, "FPriceUnitId") },
-                        FStockUnitID = new { FNumber = GetEntryBaseDataNumber(row, "FStockUnitID") },
+                        FStockUnitID = new { FNumber = GetEntryBaseDataNumber(row, "222FStockUnitID") },
                         FStockQty = GetEntryValue<decimal>(row, "FStockQty"),
                         FInStockQty = GetEntryValue<decimal>(row, "FInStockQty"),
                         FActlandQty = GetEntryValue<decimal>(row, "FActlandQty"),
