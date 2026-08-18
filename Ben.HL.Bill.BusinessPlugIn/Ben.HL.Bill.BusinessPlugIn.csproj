@@ -78,12 +78,18 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="buttonclass.cs" />
-    <Compile Include="PushReceiveBillToWMS.cs" />
+    <Compile Include="WmsModel\PushPrdReturnMtrlToWMS.cs" />
+    <Compile Include="WmsModel\PushReceiveBillToWMS.cs" />
     <Compile Include="SalContractBillPlugIn.cs" />
     <Compile Include="SaleOrderEdit.cs" />
     <Compile Include="SimulateQuotationEdit.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="WmsApiClient.cs" />
+    <Compile Include="WmsModel\PrdInStockSaveRequestModel.cs" />
+    <Compile Include="WmsModel\PrdReturnMtrlSaveRequestModel.cs" />
+    <Compile Include="WmsModel\PurMtrlReturnAppSaveRequestModel.cs" />
+    <Compile Include="WmsModel\PushPrdInStockToWMS.cs" />
+    <Compile Include="WmsModel\PushPurMtrlReturnAppToWMS.cs" />
     <Compile Include="WmsModel\WmsSaveReceiveBillRequestModel.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

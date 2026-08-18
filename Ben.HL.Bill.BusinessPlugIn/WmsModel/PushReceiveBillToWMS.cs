@@ -24,38 +24,38 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            //if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            //{
+            try
             {
-                try
+                DynamicObject billObj = this.Model.DataObject;
+                if (billObj == null)
                 {
-                    DynamicObject billObj = this.Model.DataObject;
-                    if (billObj == null)
-                    {
-                        this.View.ShowMessage("没有找到需要推送的单据数据");
-                        return;
-                    }
-
-                    // 1. 构建强类型请求对象
-                    WmsSaveReceiveBillRequestModel request = BuildStandardApiRequest(billObj);
-
-                    // 2. 序列化 JSON
-                    string jsonData = JsonConvert.SerializeObject(request, new JsonSerializerSettings
-                    {
-                        NullValueHandling = NullValueHandling.Ignore,
-                        Formatting = Formatting.Indented
-                    });
-
-                    this.View.ShowMessage($"推送数据长度：{jsonData.Length} 字符");
-
-                    // 3. 调用 API
-                    string response = _pushService.CallWmsApi(WMS_API_URL, jsonData);
-                    this.View.ShowMessage($"WMS接口返回：{response}");
+                    this.View.ShowMessage("没有找到需要推送的单据数据");
+                    return;
                 }
-                catch (Exception ex)
+
+                // 1. 构建强类型请求对象
+                WmsSaveReceiveBillRequestModel request = BuildStandardApiRequest(billObj);
+
+                // 2. 序列化 JSON
+                string jsonData = JsonConvert.SerializeObject(request, new JsonSerializerSettings
                 {
-                    this.View.ShowMessage($"推送WMS异常：{ex.Message}");
-                }
+                    NullValueHandling = NullValueHandling.Ignore,
+                    Formatting = Formatting.Indented
+                });
+
+                this.View.ShowMessage($"推送数据长度：{jsonData.Length} 字符");
+
+                // 3. 调用 API
+                string response = _pushService.CallWmsApi(WMS_API_URL, jsonData);
+                this.View.ShowMessage($"WMS接口返回：{response}");
             }
+            catch (Exception ex)
+            {
+                this.View.ShowMessage($"推送WMS异常：{ex.Message}");
+            }
+            //}
         }
 
         /// <summary>
@@ -72,9 +72,9 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 header.FID = Convert.ToInt64(billObj["Id"]);
             }
 
-            if (billObj.Contains("F_HL_SRM_Source_NO") && billObj["F_HL_SRM_Source_NO"] != null)
+            if (billObj.Contains("HL_SRM_Source_NO") && billObj["HL_SRM_Source_NO"] != null)
             {
-                header.F_HL_SRM_Source_NO = billObj["F_HL_SRM_Source_NO"].ToString();
+                header.F_HL_SRM_Source_NO = billObj["HL_SRM_Source_NO"].ToString();
             }
 
             if (billObj.Contains("BusinessType") && billObj["BusinessType"] != null)
@@ -82,10 +82,10 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 header.FBusinessType = billObj["BusinessType"].ToString();
             }
 
-            if (billObj.Contains("FDate") && billObj["FDate"] != null)
+            if (billObj.Contains("Date") && billObj["Date"] != null)
             {
                 DateTime dateVal;
-                if (DateTime.TryParse(billObj["FDate"].ToString(), out dateVal))
+                if (DateTime.TryParse(billObj["Date"].ToString(), out dateVal))
                 {
                     header.FDate = dateVal.ToString("yyyy-MM-dd HH:mm:ss");
                 }
@@ -95,9 +95,9 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 }
             }
 
-            if (billObj.Contains("FOwnerTypeIdHead") && billObj["FOwnerTypeIdHead"] != null)
+            if (billObj.Contains("OwnerTypeIdHead") && billObj["OwnerTypeIdHead"] != null)
             {
-                header.FOwnerTypeIdHead = billObj["FOwnerTypeIdHead"].ToString();
+                header.FOwnerTypeIdHead = billObj["OwnerTypeIdHead"].ToString();
             }
 
             if (billObj.Contains("F_PVCE_Combo") && billObj["F_PVCE_Combo"] != null)
@@ -105,36 +105,36 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 header.F_PVCE_Combo = billObj["F_PVCE_Combo"].ToString();
             }
 
-            if (billObj.Contains("FNote") && billObj["FNote"] != null)
+            if (billObj.Contains("Note") && billObj["Note"] != null)
             {
-                header.FNote = billObj["FNote"].ToString();
+                header.FNote = billObj["Note"].ToString();
             }
 
             // 单据类型 (映射逻辑)
             header.FBillTypeID.FNumber = GetBillTypeNumber(billObj);
 
             // --- 主表基础资料字段 ---
-            SetBaseDataNumber(billObj, "FStockOrgId", header.FStockOrgId);
-            SetBaseDataNumber(billObj, "FPurOrgId", header.FPurOrgId);
-            SetBaseDataNumber(billObj, "FSupplierId", header.FSupplierId);
-            SetBaseDataNumber(billObj, "FSupplyId", header.FSupplyId);
-            SetBaseDataNumber(billObj, "FOwnerIdHead", header.FOwnerIdHead);
+            SetBaseDataNumber(billObj, "StockOrgId", header.FStockOrgId);
+            SetBaseDataNumber(billObj, "PurOrgId", header.FPurOrgId);
+            SetBaseDataNumber(billObj, "SupplierId", header.FSupplierId);
+            SetBaseDataNumber(billObj, "SupplyId", header.FSupplyId);
+            SetBaseDataNumber(billObj, "OwnerIdHead", header.FOwnerIdHead);
 
             // --- 财务子表 (FinanceEntity) ---
-            if (billObj.Contains("FinanceEntity") && billObj["FinanceEntity"] != null)
+            if (billObj.Contains("Receivefinance") && billObj["Receivefinance"] != null)
             {
-                DynamicObjectCollection financeData = billObj["FinanceEntity"] as DynamicObjectCollection;
+                DynamicObjectCollection financeData = billObj["Receivefinance"] as DynamicObjectCollection;
                 if (financeData != null && financeData.Count > 0)
                 {
                     DynamicObject financeObj = financeData[0];
                     if (financeObj != null)
                     {
-                        SetBaseDataNumber(financeObj, "FSettleOrgId", header.FinanceEntity.FSettleOrgId);
-                        SetBaseDataNumber(financeObj, "FSettleCurrId", header.FinanceEntity.FSettleCurrId);
+                        SetBaseDataNumber(financeObj, "SettleOrgId", header.FinanceEntity.FSettleOrgId);
+                        SetBaseDataNumber(financeObj, "SettleCurrId", header.FinanceEntity.FSettleCurrId);
 
-                        if (financeObj.Contains("FPricePoint") && financeObj["FPricePoint"] != null)
+                        if (financeObj.Contains("PricePoint") && financeObj["PricePoint"] != null)
                         {
-                            header.FinanceEntity.FPricePoint = financeObj["FPricePoint"].ToString();
+                            header.FinanceEntity.FPricePoint = financeObj["PricePoint"].ToString();
                         }
                     }
                 }
@@ -167,27 +167,27 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         entry.F_PVCE_HL_SRMSFEQ = seq++;
 
                         if (row.Contains("Id") && row["Id"] != null) entry.FEntryID = Convert.ToInt32(row["Id"]);
-                        if (row.Contains("FStockQty") && row["FStockQty"] != null) entry.FStockQty = Convert.ToDecimal(row["FStockQty"]);
-                        if (row.Contains("FInStockQty") && row["FInStockQty"] != null) entry.FInStockQty = Convert.ToDecimal(row["FInStockQty"]);
-                        if (row.Contains("FActlandQty") && row["FActlandQty"] != null) entry.FActlandQty = Convert.ToDecimal(row["FActlandQty"]);
-                        if (row.Contains("FActReceiveQty") && row["FActReceiveQty"] != null) entry.FActReceiveQty = Convert.ToDecimal(row["FActReceiveQty"]);
-                        if (row.Contains("FPriceUnitQty") && row["FPriceUnitQty"] != null) entry.FPriceUnitQty = Convert.ToDecimal(row["FPriceUnitQty"]);
-                        if (row.Contains("FTAXPRICE") && row["FTAXPRICE"] != null) entry.FTAXPRICE = Convert.ToDecimal(row["FTAXPRICE"]);
-                        if (row.Contains("FEntryTaxRate") && row["FEntryTaxRate"] != null) entry.FEntryTaxRate = Convert.ToDecimal(row["FEntryTaxRate"]);
+                        if (row.Contains("StockQty") && row["StockQty"] != null) entry.FStockQty = Convert.ToDecimal(row["StockQty"]);
+                        if (row.Contains("InStockQty") && row["InStockQty"] != null) entry.FInStockQty = Convert.ToDecimal(row["InStockQty"]);
+                        if (row.Contains("ActlandQty") && row["ActlandQty"] != null) entry.FActlandQty = Convert.ToDecimal(row["ActlandQty"]);
+                        if (row.Contains("ActReceiveQty") && row["ActReceiveQty"] != null) entry.FActReceiveQty = Convert.ToDecimal(row["ActReceiveQty"]);
+                        if (row.Contains("PriceUnitQty") && row["PriceUnitQty"] != null) entry.FPriceUnitQty = Convert.ToDecimal(row["PriceUnitQty"]);
+                        if (row.Contains("TAXPRICE") && row["TAXPRICE"] != null) entry.FTAXPRICE = Convert.ToDecimal(row["TAXPRICE"]);
+                        if (row.Contains("EntryTaxRate") && row["EntryTaxRate"] != null) entry.FEntryTaxRate = Convert.ToDecimal(row["EntryTaxRate"]);
 
-                        if (row.Contains("FSrcBillNo") && row["FSrcBillNo"] != null) entry.FSrcBillNo = row["FSrcBillNo"].ToString();
-                        if (row.Contains("FMtoNo") && row["FMtoNo"] != null) entry.FMtoNo = row["FMtoNo"].ToString();
-                        if (row.Contains("FDescription") && row["FDescription"] != null) entry.FDescription = row["FDescription"].ToString();
+                        if (row.Contains("SrcBillNo") && row["SrcBillNo"] != null) entry.FSrcBillNo = row["SrcBillNo"].ToString();
+                        if (row.Contains("MtoNo") && row["MtoNo"] != null) entry.FMtoNo = row["MtoNo"].ToString();
+                        if (row.Contains("Description") && row["Description"] != null) entry.FDescription = row["Description"].ToString();
 
                         // 分录基础资料
                         SetBaseDataNumber(row, "MaterialID", entry.FMaterialId);
-                        SetBaseDataNumber(row, "FUnitId", entry.FUnitId);
-                        SetBaseDataNumber(row, "FPriceUnitId", entry.FPriceUnitId);
-                        SetBaseDataNumber(row, "222FStockUnitID", entry.FStockUnitID);
-                        SetBaseDataNumber(row, "FSTOCKID", entry.FSTOCKID);
+                        SetBaseDataNumber(row, "UnitId", entry.FUnitId);
+                        SetBaseDataNumber(row, "PriceUnitId", entry.FPriceUnitId);
+                        SetBaseDataNumber(row, "StockUnitID", entry.FStockUnitID);
+                        SetBaseDataNumber(row, "STOCKID", entry.FSTOCKID);
 
                         // 辅助属性构建
-                        entry.FAuxPropId = BuildAuxPropData(row);
+                        //entry.FAuxPropId = BuildAuxPropData(row);
 
                         // 单据关联链路构建
                         entry.FDetailEntity_Link = GetLinkData(row);
@@ -264,11 +264,11 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         var linkData = new DetailEntityLinkModel();
 
                         if (link.Contains("FlowId") && link["FlowId"] != null) linkData.FDetailEntity_Link_FFlowId = link["FlowId"].ToString();
-                        if (link.Contains("FFlowLineId") && link["FFlowLineId"] != null) linkData.FDetailEntity_Link_FFlowLineId = link["FFlowLineId"].ToString();
-                        if (link.Contains("FSBillId") && link["FSBillId"] != null) linkData.FDetailEntity_Link_FSBillId = Convert.ToInt64(link["FSBillId"]);
-                        if (link.Contains("FSId") && link["FSId"] != null) linkData.FDetailEntity_Link_FSId = Convert.ToInt64(link["FSId"]);
-                        if (link.Contains("FBaseUnitQtyOld") && link["FBaseUnitQtyOld"] != null) linkData.FDetailEntity_Link_FBaseUnitQtyOld = link["FBaseUnitQtyOld"].ToString();
-                        if (link.Contains("FBaseUnitQty") && link["FBaseUnitQty"] != null) linkData.FDetailEntity_Link_FBaseUnitQty = link["FBaseUnitQty"].ToString();
+                        if (link.Contains("FlowLineId") && link["FlowLineId"] != null) linkData.FDetailEntity_Link_FFlowLineId = link["FlowLineId"].ToString();
+                        if (link.Contains("SBillId") && link["SBillId"] != null) linkData.FDetailEntity_Link_FSBillId = Convert.ToInt64(link["SBillId"]);
+                        if (link.Contains("SId") && link["SId"] != null) linkData.FDetailEntity_Link_FSId = Convert.ToInt64(link["SId"]);
+                        if (link.Contains("BaseUnitQtyOld") && link["BaseUnitQtyOld"] != null) linkData.FDetailEntity_Link_FBaseUnitQtyOld = link["BaseUnitQtyOld"].ToString();
+                        if (link.Contains("BaseUnitQty") && link["BaseUnitQty"] != null) linkData.FDetailEntity_Link_FBaseUnitQty = link["BaseUnitQty"].ToString();
 
                         linkList.Add(linkData);
                     }
@@ -292,9 +292,9 @@ namespace Ben.HL.Bill.BusinessPlugIn
             if (sourceObj != null && targetModel != null && sourceObj.Contains(fieldName) && sourceObj[fieldName] != null)
             {
                 DynamicObject baseDataObj = sourceObj[fieldName] as DynamicObject;
-                if (baseDataObj != null && baseDataObj.Contains("FNumber") && baseDataObj["FNumber"] != null)
+                if (baseDataObj != null && baseDataObj.Contains("Number") && baseDataObj["Number"] != null)
                 {
-                    targetModel.FNumber = baseDataObj["FNumber"].ToString();
+                    targetModel.FNumber = baseDataObj["Number"].ToString();
                 }
             }
         }
@@ -306,12 +306,12 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             try
             {
-                if (billObj != null && billObj.Contains("FSrcBillTypeId") && billObj["FSrcBillTypeId"] != null)
+                if (billObj != null && billObj.Contains("SrcBillTypeId") && billObj["SrcBillTypeId"] != null)
                 {
-                    DynamicObject poTypeObj = billObj["FSrcBillTypeId"] as DynamicObject;
-                    if (poTypeObj != null && poTypeObj.Contains("FNumber") && poTypeObj["FNumber"] != null)
+                    DynamicObject poTypeObj = billObj["SrcBillTypeId"] as DynamicObject;
+                    if (poTypeObj != null && poTypeObj.Contains("Number") && poTypeObj["Number"] != null)
                     {
-                        string poBillType = poTypeObj["FNumber"].ToString();
+                        string poBillType = poTypeObj["Number"].ToString();
                         if (poBillType == "CGDD02_SYS") return "SLD03_SYS";
                         if (poBillType == "CGDD09_SYS") return "SLD09_SYS";
                     }
