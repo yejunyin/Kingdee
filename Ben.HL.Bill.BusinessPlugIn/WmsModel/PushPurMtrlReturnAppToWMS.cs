@@ -10,28 +10,25 @@ using Newtonsoft.Json;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
-    /// <summary>
-    /// 退货申请单审核后按金蝶标准API格式推送WMS
-    /// </summary>
     [HotUpdate]
-    [Description("退货申请单审核推送WMS-Ben")]
+    [Description("退料申请单审核推送WMS-Ben")]
     public class PushPurMtrlReturnAppToWMS : AbstractBillPlugIn
     {
-        private const string WMS_API_URL = "http://your-wms-api.com/api/pur_mtrl_return_app";
+        private const string WMS_API_URL = "http://your-wms-api.com/api/pur_mrapp";
         private WmsApiClient _pushService = new WmsApiClient();
 
         public override void AfterDoOperation(AfterDoOperationEventArgs e)
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
-            {
+            //if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            //{
                 try
                 {
                     DynamicObject billObj = this.Model.DataObject;
                     if (billObj == null)
                     {
-                        this.View.ShowMessage("没有找到需要推送的单据数据");
+                        ShowClientMessage("没有找到需要推送的单据数据");
                         return;
                     }
 
@@ -43,16 +40,16 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         Formatting = Formatting.Indented
                     });
 
-                    this.View.ShowMessage($"推送退货申请单数据长度：{jsonData.Length} 字符");
+                    ShowClientMessage($"推送退料申请单数据长度：{jsonData.Length} 字符");
 
                     string response = _pushService.CallWmsApi(WMS_API_URL, jsonData);
-                    this.View.ShowMessage($"WMS接口返回：{response}");
+                    ShowClientMessage($"WMS接口返回：{response}");
                 }
                 catch (Exception ex)
                 {
-                    this.View.ShowMessage($"推送WMS异常：{ex.Message}");
+                    ShowClientMessage($"推送WMS异常：{ex.Message}");
                 }
-            }
+            //}
         }
 
         private PurMtrlReturnAppSaveRequestModel BuildStandardApiRequest(DynamicObject billObj)
@@ -60,6 +57,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             var request = new PurMtrlReturnAppSaveRequestModel();
             var header = request.data.Model;
 
+            // 1. 单头基础字段
             if (billObj.Contains("Id") && billObj["Id"] != null) header.FID = Convert.ToInt64(billObj["Id"]);
             if (billObj.Contains("BillNo") && billObj["BillNo"] != null) header.FBillNo = billObj["BillNo"].ToString();
 
@@ -68,22 +66,19 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 DateTime dateVal;
                 if (DateTime.TryParse(billObj["FDate"].ToString(), out dateVal))
                     header.FDate = dateVal.ToString("yyyy-MM-dd HH:mm:ss");
-                else
-                    header.FDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             }
 
-            if (billObj.Contains("FMRTYPE") && billObj["FMRTYPE"] != null) header.FMRTYPE = billObj["FMRTYPE"].ToString();
-            if (billObj.Contains("FOwnerTypeIdHead") && billObj["FOwnerTypeIdHead"] != null) header.FOwnerTypeIdHead = billObj["FOwnerTypeIdHead"].ToString();
-            if (billObj.Contains("FNote") && billObj["FNote"] != null) header.FNote = billObj["FNote"].ToString();
+            if (billObj.Contains("RMTYPE") && billObj["RMTYPE"] != null) header.FRMTYPE = billObj["RMTYPE"].ToString();
+            if (billObj.Contains("FRemarks") && billObj["FRemarks"] != null) header.FRemarks = billObj["FRemarks"].ToString();
 
+            // 2. 单头基础资料读取
             SetBaseDataNumber(billObj, "FBillTypeID", header.FBillTypeID);
-            SetBaseDataNumber(billObj, "MRORGID", header.MRORGID);
-            SetBaseDataNumber(billObj, "FRetOrgId", header.FRetOrgId);
-            SetBaseDataNumber(billObj, "FSupplierId", header.FSupplierId);
-            SetBaseDataNumber(billObj, "FStockOrgId", header.FStockOrgId);
-            SetBaseDataNumber(billObj, "FOwnerIdHead", header.FOwnerIdHead);
+            SetBaseDataNumber(billObj, "PURCHASEORGID", header.FPURCHASEORGID);
+            SetBaseDataNumber(billObj, "APPORGID", header.FAPPORGID);
+            SetBaseDataNumber(billObj, "SUPPLIERID", header.FSUPPLIERID);
 
-            header.FEntity = BuildDetailEntityList(billObj);
+            // 3. 构建单据体 PUR_MRAPPENTRY
+            header.FPUR_MRAPPENTRY = BuildDetailEntityList(billObj);
 
             return request;
         }
@@ -92,9 +87,10 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             var detailList = new List<PurMtrlReturnAppEntryModel>();
 
-            if (billObj.Contains("FEntity") && billObj["FEntity"] != null)
+            // 匹配后台的单据体字段 PUR_MRAPPENTRY
+            if (billObj.Contains("PUR_MRAPPENTRY") && billObj["PUR_MRAPPENTRY"] != null)
             {
-                DynamicObjectCollection detailEntity = billObj["FEntity"] as DynamicObjectCollection;
+                DynamicObjectCollection detailEntity = billObj["PUR_MRAPPENTRY"] as DynamicObjectCollection;
                 if (detailEntity != null && detailEntity.Count > 0)
                 {
                     int seq = 1;
@@ -106,21 +102,29 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         entry.FSeq = seq++;
 
                         if (row.Contains("Id") && row["Id"] != null) entry.FEntryID = Convert.ToInt32(row["Id"]);
-                        if (row.Contains("FAppQty") && row["FAppQty"] != null) entry.FAppQty = Convert.ToDecimal(row["FAppQty"]);
-                        if (row.Contains("FBaseAppQty") && row["FBaseAppQty"] != null) entry.FBaseAppQty = Convert.ToDecimal(row["FBaseAppQty"]);
 
-                        if (row.Contains("FBatchNo") && row["FBatchNo"] != null) entry.FBatchNo = row["FBatchNo"].ToString();
-                        if (row.Contains("FSrcBillNo") && row["FSrcBillNo"] != null) entry.FSrcBillNo = row["FSrcBillNo"].ToString();
-                        if (row.Contains("FSrcFormId") && row["FSrcFormId"] != null) entry.FSrcFormId = row["FSrcFormId"].ToString();
-                        if (row.Contains("FNote") && row["FNote"] != null) entry.FNote = row["FNote"].ToString();
+                        // 核心数量字段匹配
+                        if (row.Contains("MRAPPQTY") && row["MRAPPQTY"] != null) entry.FMRAPPQTY = Convert.ToDecimal(row["MRAPPQTY"]);
+                        if (row.Contains("BASEUNITQTY") && row["BASEUNITQTY"] != null) entry.FBASEUNITQTY = Convert.ToDecimal(row["BASEUNITQTY"]);
 
-                        SetBaseDataNumber(row, "FMaterialId", entry.FMaterialId);
-                        SetBaseDataNumber(row, "FUnitId", entry.FUnitId);
-                        SetBaseDataNumber(row, "FBaseUnitId", entry.FBaseUnitId);
-                        SetBaseDataNumber(row, "FStockId", entry.FStockId);
-                        SetBaseDataNumber(row, "FStockLocId", entry.FStockLocId);
+                        // 批号（优先读取文本）
+                        if (row.Contains("FLot_Text") && row["FLot_Text"] != null && !string.IsNullOrWhiteSpace(row["FLot_Text"].ToString()))
+                        {
+                            entry.FLot = row["FLot_Text"].ToString();
+                        }
 
-                        entry.FAuxPropId = BuildAuxPropData(row);
+                        // 源单与备注
+                        if (row.Contains("SRCBILLNO") && row["SRCBILLNO"] != null) entry.FSRCBILLNO = row["SRCBILLNO"].ToString();
+                        if (row.Contains("SRCBILLTYPEID") && row["SRCBILLTYPEID"] != null) entry.FSRCBILLTYPEID = row["SRCBILLTYPEID"].ToString();
+                        if (row.Contains("NOTE_M") && row["NOTE_M"] != null) entry.FNOTE_M = row["NOTE_M"].ToString();
+
+                        // 单据体基础资料匹配
+                        SetBaseDataNumber(row, "MATERIALID", entry.FMATERIALID);
+                        SetBaseDataNumber(row, "UNITID", entry.FUNITID);
+                        SetBaseDataNumber(row, "BASEUNITID", entry.FBASEUNITID);
+                        SetBaseDataNumber(row, "StockId", entry.FStockId);
+
+                        // 源单关联链路（推送下游/下游生成单据的关键）
                         entry.FEntity_Link = GetLinkData(row);
 
                         detailList.Add(entry);
@@ -129,41 +133,6 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
 
             return detailList;
-        }
-
-        private Dictionary<string, BaseDataModel> BuildAuxPropData(DynamicObject row)
-        {
-            var auxPropDict = new Dictionary<string, BaseDataModel>();
-            string[] auxFields = new string[]
-            {
-                "FAUXPROPID__FF100001", "FAUXPROPID__FF100002", "FAUXPROPID__FF100003",
-                "FAUXPROPID__FF100004", "FAUXPROPID__FF100005", "FAUXPROPID__FF100006"
-            };
-
-            if (row != null && row.Contains("FAuxPropId") && row["FAuxPropId"] != null)
-            {
-                DynamicObject auxPropObj = row["FAuxPropId"] as DynamicObject;
-                if (auxPropObj != null)
-                {
-                    foreach (string field in auxFields)
-                    {
-                        var baseData = new BaseDataModel();
-                        if (auxPropObj.Contains(field) && auxPropObj[field] != null)
-                        {
-                            DynamicObject ffPropObj = auxPropObj[field] as DynamicObject;
-                            if (ffPropObj != null && ffPropObj.Contains("FNumber") && ffPropObj["FNumber"] != null)
-                            {
-                                baseData.FNumber = ffPropObj["FNumber"].ToString();
-                            }
-                        }
-                        auxPropDict[field] = baseData;
-                    }
-                    return auxPropDict;
-                }
-            }
-
-            foreach (string field in auxFields) auxPropDict[field] = new BaseDataModel();
-            return auxPropDict;
         }
 
         private List<PurMtrlReturnAppEntryLinkModel> GetLinkData(DynamicObject row)
@@ -181,18 +150,17 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         var linkData = new PurMtrlReturnAppEntryLinkModel();
 
                         if (link.Contains("FlowId") && link["FlowId"] != null) linkData.FEntity_Link_FFlowId = link["FlowId"].ToString();
-                        if (link.Contains("FFlowLineId") && link["FFlowLineId"] != null) linkData.FEntity_Link_FFlowLineId = link["FFlowLineId"].ToString();
-                        if (link.Contains("FRuleId") && link["FRuleId"] != null) linkData.FEntity_Link_FRuleId = link["FRuleId"].ToString();
-                        if (link.Contains("FSTableName") && link["FSTableName"] != null) linkData.FEntity_Link_FSTableName = link["FSTableName"].ToString();
-                        if (link.Contains("FSBillId") && link["FSBillId"] != null) linkData.FEntity_Link_FSBillId = Convert.ToInt64(link["FSBillId"]);
-                        if (link.Contains("FSId") && link["FSId"] != null) linkData.FEntity_Link_FSId = Convert.ToInt64(link["FSId"]);
+                        if (link.Contains("FlowLineId") && link["FlowLineId"] != null) linkData.FEntity_Link_FFlowLineId = link["FlowLineId"].ToString();
+                        if (link.Contains("RuleId") && link["RuleId"] != null) linkData.FEntity_Link_FRuleId = link["RuleId"].ToString();
+                        if (link.Contains("STableName") && link["STableName"] != null) linkData.FEntity_Link_FSTableName = link["STableName"].ToString();
+                        if (link.Contains("SBillId") && link["SBillId"] != null) linkData.FEntity_Link_FSBillId = Convert.ToInt64(link["SBillId"]);
+                        if (link.Contains("SId") && link["SId"] != null) linkData.FEntity_Link_FSId = Convert.ToInt64(link["SId"]);
 
                         linkList.Add(linkData);
                     }
                 }
             }
 
-            if (linkList.Count == 0) linkList.Add(new PurMtrlReturnAppEntryLinkModel());
             return linkList;
         }
 
@@ -201,10 +169,18 @@ namespace Ben.HL.Bill.BusinessPlugIn
             if (sourceObj != null && targetModel != null && sourceObj.Contains(fieldName) && sourceObj[fieldName] != null)
             {
                 DynamicObject baseDataObj = sourceObj[fieldName] as DynamicObject;
-                if (baseDataObj != null && baseDataObj.Contains("FNumber") && baseDataObj["FNumber"] != null)
+                if (baseDataObj != null && baseDataObj.Contains("Number") && baseDataObj["Number"] != null)
                 {
-                    targetModel.FNumber = baseDataObj["FNumber"].ToString();
+                    targetModel.FNumber = baseDataObj["Number"].ToString();
                 }
+            }
+        }
+
+        private void ShowClientMessage(string message)
+        {
+            if (this.View != null)
+            {
+                this.View.ShowMessage(message);
             }
         }
     }

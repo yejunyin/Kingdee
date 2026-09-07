@@ -1,31 +1,33 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Linq;
 using Kingdee.BOS;
 using Kingdee.BOS.Core.Bill.PlugIn;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
+using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Orm.DataEntity;
+using Kingdee.BOS.ServiceHelper;
 using Kingdee.BOS.Util;
 using Newtonsoft.Json;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
-    /// <summary>
-    /// 收料通知单审核后按金蝶标准API格式推送WMS
-    /// </summary>
     [HotUpdate]
     [Description("收料通知单审核推送WMS-Ben")]
     public class PushReceiveBillToWMS : AbstractBillPlugIn
     {
-        private const string WMS_API_URL = "http://your-wms-api.com/api/receive";
-        private WmsApiClient _pushService = new WmsApiClient();
+        private readonly WmsApiClient _apiClient = new WmsApiClient();
 
         public override void AfterDoOperation(AfterDoOperationEventArgs e)
         {
             base.AfterDoOperation(e);
 
-            //if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
-            //{
+            if (!e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
             try
             {
                 DynamicObject billObj = this.Model.DataObject;
@@ -35,214 +37,195 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     return;
                 }
 
-                // 1. 构建强类型请求对象
-                WmsSaveReceiveBillRequestModel request = BuildStandardApiRequest(billObj);
+                IntegrationConfig config = IntegrationConfig.Load();
+                List<ReceiveEntrySource> entries = GetEntrySources(billObj);
+                Dictionary<string, string> materialOrgValues = QueryMaterialOrgValues(config, entries);
+                HashSet<string> wmsOrgValues = new HashSet<string>(config.WmsOrgValues, StringComparer.OrdinalIgnoreCase);
+                List<ReceiveEntrySource> wmsEntries = entries
+                    .Where(entry => materialOrgValues.ContainsKey(entry.MaterialId)
+                        && IsWmsValue(materialOrgValues[entry.MaterialId], wmsOrgValues))
+                    .ToList();
 
-                // 2. 序列化 JSON
-                string jsonData = JsonConvert.SerializeObject(request, new JsonSerializerSettings
+                WmsSaveReceiveBillRequestModel wmsRequest = BuildStandardApiRequest(billObj, entries);
+                string wmsJson = Serialize(wmsRequest);
+                _apiClient.PostJson(config.WmsApiUrl, wmsJson);
+
+                if (wmsEntries.Count == 0)
                 {
-                    NullValueHandling = NullValueHandling.Ignore,
-                    Formatting = Formatting.Indented
-                });
+                    this.View.ShowMessage("WMS推送成功；没有需要回写SRM的WMS管辖分录");
+                    return;
+                }
 
-                this.View.ShowMessage($"推送数据长度：{jsonData.Length} 字符");
-
-                // 3. 调用 API
-                string response = _pushService.CallWmsApi(WMS_API_URL, jsonData);
-                this.View.ShowMessage($"WMS接口返回：{response}");
+                SrmReceiveRequestModel srmRequest = BuildSrmRequest(billObj, wmsEntries, config);
+                string srmResponse = _apiClient.PostJson(config.SrmApiUrl, Serialize(srmRequest));
+                this.View.ShowMessage(string.Format("WMS推送成功，SRM批量回写成功，共{0}条。SRM返回：{1}", wmsEntries.Count, srmResponse));
             }
             catch (Exception ex)
             {
-                this.View.ShowMessage($"推送WMS异常：{ex.Message}");
+                this.View.ShowMessage("收料通知单联动处理异常：" + ex.Message);
             }
-            //}
         }
 
-        /// <summary>
-        /// 使用显式赋值格式构建请求结构
-        /// </summary>
-        private WmsSaveReceiveBillRequestModel BuildStandardApiRequest(DynamicObject billObj)
+        private Dictionary<string, string> QueryMaterialOrgValues(IntegrationConfig config, List<ReceiveEntrySource> entries)
+        {
+            List<string> materialIds = entries.Select(entry => entry.MaterialId).Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList();
+            var result = new Dictionary<string, string>();
+            if (materialIds.Count == 0)
+            {
+                return result;
+            }
+
+            string ids = string.Join(",", materialIds.Select(ToNumericId));
+            string sql = string.Format(@"
+                SELECT FMATERIALID, F_BHD_ORGID_9ZU
+                FROM T_BD_MATERIAL
+                WHERE FMATERIALID IN ({0})", ids);
+
+            DynamicObjectCollection rows = DBServiceHelper.ExecuteDynamicObject(this.Context, sql);
+            foreach (DynamicObject row in rows)
+            {
+                string materialId = row["FMATERIALID"] == null ? string.Empty : row["FMATERIALID"].ToString();
+                string orgValue = row["F_BHD_ORGID_9ZU"] == null ? string.Empty : row["F_BHD_ORGID_9ZU"].ToString();
+                if (!string.IsNullOrEmpty(materialId))
+                {
+                    result[materialId] = orgValue;
+                }
+            }
+            return result;
+        }
+
+        private string ToNumericId(string value)
+        {
+            long id;
+            if (!long.TryParse(value, out id))
+            {
+                throw new Exception("物料内码格式错误：" + value);
+            }
+            return id.ToString();
+        }
+
+        private bool IsWmsValue(string materialOrgValue, HashSet<string> configuredValues)
+        {
+            return materialOrgValue.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(value => configuredValues.Contains(value.Trim()));
+        }
+
+        private List<ReceiveEntrySource> GetEntrySources(DynamicObject billObj)
+        {
+            var result = new List<ReceiveEntrySource>();
+            DynamicObjectCollection rows = billObj["PUR_ReceiveEntry"] as DynamicObjectCollection;
+            if (rows == null)
+            {
+                return result;
+            }
+
+            int seq = 1;
+            foreach (DynamicObject row in rows)
+            {
+                DynamicObject material = row["MaterialID"] as DynamicObject;
+                string materialId = GetValue(material, "Id");
+                result.Add(new ReceiveEntrySource
+                {
+                    Row = row,
+                    Seq = seq++,
+                    MaterialId = materialId
+                });
+            }
+            return result;
+        }
+
+        private WmsSaveReceiveBillRequestModel BuildStandardApiRequest(DynamicObject billObj, List<ReceiveEntrySource> selectedEntries)
         {
             var request = new WmsSaveReceiveBillRequestModel();
-            var header = request.data.Model;
+            ReceiveBillHeaderModel header = request.data.Model;
 
-            // --- 主表基础字段赋值 ---
-            if (billObj.Contains("Id") && billObj["Id"] != null)
-            {
-                header.FID = Convert.ToInt64(billObj["Id"]);
-            }
-
-            if (billObj.Contains("HL_SRM_Source_NO") && billObj["HL_SRM_Source_NO"] != null)
-            {
-                header.F_HL_SRM_Source_NO = billObj["HL_SRM_Source_NO"].ToString();
-            }
-
-            if (billObj.Contains("BusinessType") && billObj["BusinessType"] != null)
-            {
-                header.FBusinessType = billObj["BusinessType"].ToString();
-            }
-
-            if (billObj.Contains("Date") && billObj["Date"] != null)
-            {
-                DateTime dateVal;
-                if (DateTime.TryParse(billObj["Date"].ToString(), out dateVal))
-                {
-                    header.FDate = dateVal.ToString("yyyy-MM-dd HH:mm:ss");
-                }
-                else
-                {
-                    header.FDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                }
-            }
-
-            if (billObj.Contains("OwnerTypeIdHead") && billObj["OwnerTypeIdHead"] != null)
-            {
-                header.FOwnerTypeIdHead = billObj["OwnerTypeIdHead"].ToString();
-            }
-
-            if (billObj.Contains("F_PVCE_Combo") && billObj["F_PVCE_Combo"] != null)
-            {
-                header.F_PVCE_Combo = billObj["F_PVCE_Combo"].ToString();
-            }
-
-            if (billObj.Contains("Note") && billObj["Note"] != null)
-            {
-                header.FNote = billObj["Note"].ToString();
-            }
-
-            // 单据类型 (映射逻辑)
+            header.FID = GetLong(billObj, "Id");
+            header.F_HL_SRM_Source_NO = GetValue(billObj, "HL_SRM_Source_NO");
+            header.FBusinessType = GetValue(billObj, "BusinessType");
+            header.FDate = GetDate(billObj, "Date");
+            header.FOwnerTypeIdHead = GetValue(billObj, "OwnerTypeIdHead");
+            header.F_PVCE_Combo = GetValue(billObj, "F_PVCE_Combo");
+            header.FNote = GetValue(billObj, "Note");
             header.FBillTypeID.FNumber = GetBillTypeNumber(billObj);
-
-            // --- 主表基础资料字段 ---
             SetBaseDataNumber(billObj, "StockOrgId", header.FStockOrgId);
             SetBaseDataNumber(billObj, "PurOrgId", header.FPurOrgId);
             SetBaseDataNumber(billObj, "SupplierId", header.FSupplierId);
             SetBaseDataNumber(billObj, "SupplyId", header.FSupplyId);
             SetBaseDataNumber(billObj, "OwnerIdHead", header.FOwnerIdHead);
 
-            // --- 财务子表 (FinanceEntity) ---
-            if (billObj.Contains("Receivefinance") && billObj["Receivefinance"] != null)
+            DynamicObjectCollection financeRows = billObj["Receivefinance"] as DynamicObjectCollection;
+            if (financeRows != null && financeRows.Count > 0)
             {
-                DynamicObjectCollection financeData = billObj["Receivefinance"] as DynamicObjectCollection;
-                if (financeData != null && financeData.Count > 0)
-                {
-                    DynamicObject financeObj = financeData[0];
-                    if (financeObj != null)
-                    {
-                        SetBaseDataNumber(financeObj, "SettleOrgId", header.FinanceEntity.FSettleOrgId);
-                        SetBaseDataNumber(financeObj, "SettleCurrId", header.FinanceEntity.FSettleCurrId);
-
-                        if (financeObj.Contains("PricePoint") && financeObj["PricePoint"] != null)
-                        {
-                            header.FinanceEntity.FPricePoint = financeObj["PricePoint"].ToString();
-                        }
-                    }
-                }
+                SetBaseDataNumber(financeRows[0], "SettleOrgId", header.FinanceEntity.FSettleOrgId);
+                SetBaseDataNumber(financeRows[0], "SettleCurrId", header.FinanceEntity.FSettleCurrId);
+                header.FinanceEntity.FPricePoint = GetValue(financeRows[0], "PricePoint");
             }
 
-            // --- 明细表 (PUR_ReceiveEntry) ---
-            header.FDetailEntity = BuildDetailEntityList(billObj);
-
+            header.FDetailEntity = selectedEntries.Select(BuildEntry).ToList();
             return request;
         }
-
+        
         /// <summary>
         /// 构建分录列表
         /// </summary>
-        private List<ReceiveBillEntryModel> BuildDetailEntityList(DynamicObject billObj)
+        private ReceiveBillEntryModel BuildEntry(ReceiveEntrySource source)
         {
-            var detailList = new List<ReceiveBillEntryModel>();
-
-            if (billObj.Contains("PUR_ReceiveEntry") && billObj["PUR_ReceiveEntry"] != null)
+            DynamicObject row = source.Row;
+            var entry = new ReceiveBillEntryModel
             {
-                DynamicObjectCollection detailEntity = billObj["PUR_ReceiveEntry"] as DynamicObjectCollection;
-                if (detailEntity != null && detailEntity.Count > 0)
-                {
-                    int seq = 1;
-                    foreach (DynamicObject row in detailEntity)
-                    {
-                        if (row == null) continue;
-
-                        var entry = new ReceiveBillEntryModel();
-                        entry.F_PVCE_HL_SRMSFEQ = seq++;
-
-                        if (row.Contains("Id") && row["Id"] != null) entry.FEntryID = Convert.ToInt32(row["Id"]);
-                        if (row.Contains("StockQty") && row["StockQty"] != null) entry.FStockQty = Convert.ToDecimal(row["StockQty"]);
-                        if (row.Contains("InStockQty") && row["InStockQty"] != null) entry.FInStockQty = Convert.ToDecimal(row["InStockQty"]);
-                        if (row.Contains("ActlandQty") && row["ActlandQty"] != null) entry.FActlandQty = Convert.ToDecimal(row["ActlandQty"]);
-                        if (row.Contains("ActReceiveQty") && row["ActReceiveQty"] != null) entry.FActReceiveQty = Convert.ToDecimal(row["ActReceiveQty"]);
-                        if (row.Contains("PriceUnitQty") && row["PriceUnitQty"] != null) entry.FPriceUnitQty = Convert.ToDecimal(row["PriceUnitQty"]);
-                        if (row.Contains("TAXPRICE") && row["TAXPRICE"] != null) entry.FTAXPRICE = Convert.ToDecimal(row["TAXPRICE"]);
-                        if (row.Contains("EntryTaxRate") && row["EntryTaxRate"] != null) entry.FEntryTaxRate = Convert.ToDecimal(row["EntryTaxRate"]);
-
-                        if (row.Contains("SrcBillNo") && row["SrcBillNo"] != null) entry.FSrcBillNo = row["SrcBillNo"].ToString();
-                        if (row.Contains("MtoNo") && row["MtoNo"] != null) entry.FMtoNo = row["MtoNo"].ToString();
-                        if (row.Contains("Description") && row["Description"] != null) entry.FDescription = row["Description"].ToString();
-
-                        // 分录基础资料
-                        SetBaseDataNumber(row, "MaterialID", entry.FMaterialId);
-                        SetBaseDataNumber(row, "UnitId", entry.FUnitId);
-                        SetBaseDataNumber(row, "PriceUnitId", entry.FPriceUnitId);
-                        SetBaseDataNumber(row, "StockUnitID", entry.FStockUnitID);
-                        SetBaseDataNumber(row, "STOCKID", entry.FSTOCKID);
-
-                        // 辅助属性构建
-                        //entry.FAuxPropId = BuildAuxPropData(row);
-
-                        // 单据关联链路构建
-                        entry.FDetailEntity_Link = GetLinkData(row);
-
-                        detailList.Add(entry);
-                    }
-                }
-            }
-
-            return detailList;
+                F_PVCE_HL_SRMSFEQ = source.Seq,
+                FEntryID = Convert.ToInt32(GetLong(row, "Id")),
+                FStockQty = GetDecimal(row, "StockQty"),
+                FInStockQty = GetDecimal(row, "InStockQty"),
+                FActlandQty = GetDecimal(row, "ActlandQty"),
+                FActReceiveQty = GetDecimal(row, "ActReceiveQty"),
+                FPriceUnitQty = GetDecimal(row, "PriceUnitQty"),
+                FTAXPRICE = GetDecimal(row, "TAXPRICE"),
+                FEntryTaxRate = GetDecimal(row, "EntryTaxRate"),
+                FSrcBillNo = GetValue(row, "SrcBillNo"),
+                FMtoNo = GetValue(row, "MtoNo"),
+                FDescription = GetValue(row, "Description")
+            };
+            SetBaseDataNumber(row, "MaterialID", entry.FMaterialId);
+            SetBaseDataNumber(row, "UnitId", entry.FUnitId);
+            SetBaseDataNumber(row, "PriceUnitId", entry.FPriceUnitId);
+            SetBaseDataNumber(row, "StockUnitID", entry.FStockUnitID);
+            SetBaseDataNumber(row, "STOCKID", entry.FSTOCKID);
+            entry.FDetailEntity_Link = GetLinkData(row);
+            return entry;
         }
 
-        /// <summary>
-        /// 构建辅助属性
-        /// </summary>
-        private Dictionary<string, BaseDataModel> BuildAuxPropData(DynamicObject row)
+        private SrmReceiveRequestModel BuildSrmRequest(DynamicObject billObj, List<ReceiveEntrySource> selectedEntries, IntegrationConfig config)
         {
-            var auxPropDict = new Dictionary<string, BaseDataModel>();
-            string[] auxFields = new string[]
-            {
-                "FAUXPROPID__FF100001", "FAUXPROPID__FF100002", "FAUXPROPID__FF100003",
-                "FAUXPROPID__FF100004", "FAUXPROPID__FF100005", "FAUXPROPID__FF100006",
-                "FAUXPROPID__FF100007", "FAUXPROPID__FF100008", "FAUXPROPID__FF100009",
-                "FAUXPROPID__FF100010", "FAUXPROPID__FF100011", "FAUXPROPID__FF100012"
-            };
+            string erpDoc = GetValue(billObj, "BillNo");
+            DynamicObject supplier = billObj["SupplierId"] as DynamicObject;
+            string receiveDoc = GetValue(billObj, "HL_SRM_Source_NO");
 
-            if (row != null && row.Contains("FAuxPropId") && row["FAuxPropId"] != null)
+            return new SrmReceiveRequestModel
             {
-                DynamicObject auxPropObj = row["FAuxPropId"] as DynamicObject;
-                if (auxPropObj != null)
+                groupCode = config.SrmGroupCode,
+                ERPDoc = erpDoc,
+                userCode = config.SrmUserCode,
+                departmentCode = config.SrmDepartmentCode,
+                docDate = GetDate(billObj, "Date").Replace("-", "/").Substring(0, 10),
+                supCode = GetValue(supplier, "Number"),
+                supNamess = GetValue(supplier, "Name"),
+                srtRtfList = selectedEntries.Select(entry => new SrmReceiveEntryModel
                 {
-                    foreach (string field in auxFields)
-                    {
-                        var baseData = new BaseDataModel();
-                        if (auxPropObj.Contains(field) && auxPropObj[field] != null)
-                        {
-                            DynamicObject ffPropObj = auxPropObj[field] as DynamicObject;
-                            if (ffPropObj != null && ffPropObj.Contains("FNumber") && ffPropObj["FNumber"] != null)
-                            {
-                                baseData.FNumber = ffPropObj["FNumber"].ToString();
-                            }
-                        }
-                        auxPropDict[field] = baseData;
-                    }
-                    return auxPropDict;
-                }
-            }
-
-            // 兜底补空
-            foreach (string field in auxFields)
-            {
-                auxPropDict[field] = new BaseDataModel();
-            }
-
-            return auxPropDict;
+                    docSN = entry.Seq,
+                    recieveDoc = receiveDoc,
+                    recieveDocSN = entry.Seq,
+                    srmrecieveDocSN = GetValue(entry.Row, "F_PVCE_HL_SRMSFEQ"),
+                    materialCode = GetValue(entry.Row["MaterialID"] as DynamicObject, "Number"),
+                    materialName = GetValue(entry.Row["MaterialID"] as DynamicObject, "Name"),
+                    materialSpec = GetValue(entry.Row["MaterialID"] as DynamicObject, "Specification"),
+                    unitCode = GetValue(entry.Row["UnitId"] as DynamicObject, "Number"),
+                    batchNo = GetValue(entry.Row, "Lot_Text"),
+                    num = GetDecimal(entry.Row, "ActReceiveQty"),
+                    warehouseCode = GetValue(entry.Row["STOCKID"] as DynamicObject, "Number"),
+                    locationCode = GetValue(entry.Row, "LocationId")
+                }).ToList()
+            };
         }
 
         /// <summary>
@@ -250,78 +233,76 @@ namespace Ben.HL.Bill.BusinessPlugIn
         /// </summary>
         private List<DetailEntityLinkModel> GetLinkData(DynamicObject row)
         {
-            var linkList = new List<DetailEntityLinkModel>();
-
-            if (row != null && row.Contains("FDetailEntity_Link") && row["FDetailEntity_Link"] != null)
+            var result = new List<DetailEntityLinkModel>();
+            DynamicObjectCollection links = row["FDetailEntity_Link"] as DynamicObjectCollection;
+            if (links != null)
             {
-                DynamicObjectCollection links = row["FDetailEntity_Link"] as DynamicObjectCollection;
-                if (links != null && links.Count > 0)
+                foreach (DynamicObject link in links)
                 {
-                    foreach (DynamicObject link in links)
+                    result.Add(new DetailEntityLinkModel
                     {
-                        if (link == null) continue;
-
-                        var linkData = new DetailEntityLinkModel();
-
-                        if (link.Contains("FlowId") && link["FlowId"] != null) linkData.FDetailEntity_Link_FFlowId = link["FlowId"].ToString();
-                        if (link.Contains("FlowLineId") && link["FlowLineId"] != null) linkData.FDetailEntity_Link_FFlowLineId = link["FlowLineId"].ToString();
-                        if (link.Contains("SBillId") && link["SBillId"] != null) linkData.FDetailEntity_Link_FSBillId = Convert.ToInt64(link["SBillId"]);
-                        if (link.Contains("SId") && link["SId"] != null) linkData.FDetailEntity_Link_FSId = Convert.ToInt64(link["SId"]);
-                        if (link.Contains("BaseUnitQtyOld") && link["BaseUnitQtyOld"] != null) linkData.FDetailEntity_Link_FBaseUnitQtyOld = link["BaseUnitQtyOld"].ToString();
-                        if (link.Contains("BaseUnitQty") && link["BaseUnitQty"] != null) linkData.FDetailEntity_Link_FBaseUnitQty = link["BaseUnitQty"].ToString();
-
-                        linkList.Add(linkData);
-                    }
+                        FDetailEntity_Link_FFlowId = GetValue(link, "FlowId"),
+                        FDetailEntity_Link_FFlowLineId = GetValue(link, "FlowLineId"),
+                        FDetailEntity_Link_FSBillId = GetLong(link, "SBillId"),
+                        FDetailEntity_Link_FSId = GetLong(link, "SId"),
+                        FDetailEntity_Link_FBaseUnitQtyOld = GetValue(link, "BaseUnitQtyOld"),
+                        FDetailEntity_Link_FBaseUnitQty = GetValue(link, "BaseUnitQty")
+                    });
                 }
             }
-
-            if (linkList.Count == 0)
-            {
-                // 无关联时添加默认空数据
-                linkList.Add(new DetailEntityLinkModel());
-            }
-
-            return linkList;
+            return result;
         }
-
         /// <summary>
         /// 安全提取 DynamicObject 基础资料中的 FNumber 辅助方法
         /// </summary>
-        private void SetBaseDataNumber(DynamicObject sourceObj, string fieldName, BaseDataModel targetModel)
+        private void SetBaseDataNumber(DynamicObject source, string fieldName, BaseDataModel target)
         {
-            if (sourceObj != null && targetModel != null && sourceObj.Contains(fieldName) && sourceObj[fieldName] != null)
-            {
-                DynamicObject baseDataObj = sourceObj[fieldName] as DynamicObject;
-                if (baseDataObj != null && baseDataObj.Contains("Number") && baseDataObj["Number"] != null)
-                {
-                    targetModel.FNumber = baseDataObj["Number"].ToString();
-                }
-            }
+            DynamicObject value = source == null ? null : source[fieldName] as DynamicObject;
+            target.FNumber = GetValue(value, "Number");
         }
 
-        /// <summary>
-        /// 单据类型转换逻辑
-        /// </summary>
         private string GetBillTypeNumber(DynamicObject billObj)
         {
-            try
-            {
-                if (billObj != null && billObj.Contains("SrcBillTypeId") && billObj["SrcBillTypeId"] != null)
-                {
-                    DynamicObject poTypeObj = billObj["SrcBillTypeId"] as DynamicObject;
-                    if (poTypeObj != null && poTypeObj.Contains("Number") && poTypeObj["Number"] != null)
-                    {
-                        string poBillType = poTypeObj["Number"].ToString();
-                        if (poBillType == "CGDD02_SYS") return "SLD03_SYS";
-                        if (poBillType == "CGDD09_SYS") return "SLD09_SYS";
-                    }
-                }
-            }
-            catch
-            {
-                // 忽略异常，降级返回默认值
-            }
+            DynamicObject sourceType = billObj["SrcBillTypeId"] as DynamicObject;
+            string number = GetValue(sourceType, "Number");
+            if (number == "CGDD02_SYS") return "SLD03_SYS";
+            if (number == "CGDD09_SYS") return "SLD09_SYS";
             return "SLD01_SYS";
+        }
+
+        private string GetValue(DynamicObject source, string fieldName)
+        {
+            return source != null && source.Contains(fieldName) && source[fieldName] != null ? source[fieldName].ToString() : string.Empty;
+        }
+
+        private long GetLong(DynamicObject source, string fieldName)
+        {
+            long value;
+            return long.TryParse(GetValue(source, fieldName), out value) ? value : 0;
+        }
+
+        private decimal GetDecimal(DynamicObject source, string fieldName)
+        {
+            decimal value;
+            return decimal.TryParse(GetValue(source, fieldName), out value) ? value : 0;
+        }
+
+        private string GetDate(DynamicObject source, string fieldName)
+        {
+            DateTime value;
+            return DateTime.TryParse(GetValue(source, fieldName), out value) ? value.ToString("yyyy-MM-dd HH:mm:ss") : DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private string Serialize(object value)
+        {
+            return JsonConvert.SerializeObject(value, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+        }
+
+        private class ReceiveEntrySource
+        {
+            public DynamicObject Row { get; set; }
+            public int Seq { get; set; }
+            public string MaterialId { get; set; }
         }
     }
 }

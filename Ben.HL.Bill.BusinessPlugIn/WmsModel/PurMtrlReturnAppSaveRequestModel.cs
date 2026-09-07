@@ -5,7 +5,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
     // API 根请求包
     public class PurMtrlReturnAppSaveRequestModel
     {
-        public string FormId { get; set; } = "PUR_MtrlReturnApp";
+        public string FormId { get; set; } = "PUR_MRAPP"; // 根据后台传参调整为 PUR_MRAPP
         public PurMtrlReturnAppSaveDataModel data { get; set; } = new PurMtrlReturnAppSaveDataModel();
     }
 
@@ -34,15 +34,15 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public string FBillNo { get; set; }
         public BaseDataModel FBillTypeID { get; set; } = new BaseDataModel();
         public string FDate { get; set; }
-        public BaseDataModel MRORGID { get; set; } = new BaseDataModel();      // 退货组织
-        public BaseDataModel FRetOrgId { get; set; } = new BaseDataModel();     // 退货部门/组织
-        public BaseDataModel FSupplierId { get; set; } = new BaseDataModel();   // 供应商
-        public BaseDataModel FStockOrgId { get; set; } = new BaseDataModel();   // 库存组织
-        public string FMRTYPE { get; set; }                                     // 退货类型
-        public string FOwnerTypeIdHead { get; set; }
-        public BaseDataModel FOwnerIdHead { get; set; } = new BaseDataModel();
-        public string FNote { get; set; }
-        public List<PurMtrlReturnAppEntryModel> FEntity { get; set; } = new List<PurMtrlReturnAppEntryModel>();
+        
+        public BaseDataModel FPURCHASEORGID { get; set; } = new BaseDataModel(); // 采购组织
+        public BaseDataModel FAPPORGID { get; set; } = new BaseDataModel();     // 申请组织
+        public BaseDataModel FSUPPLIERID { get; set; } = new BaseDataModel();   // 供应商
+        public string FRMTYPE { get; set; }                                     // 退料类型 (RMTYPE)
+        public string FRemarks { get; set; }                                   // 备注
+
+        // 明细单据体映射为 PUR_MRAPPENTRY
+        public List<PurMtrlReturnAppEntryModel> FPUR_MRAPPENTRY { get; set; } = new List<PurMtrlReturnAppEntryModel>();
     }
 
     // 明细表模型
@@ -50,18 +50,19 @@ namespace Ben.HL.Bill.BusinessPlugIn
     {
         public int FEntryID { get; set; }
         public int FSeq { get; set; }
-        public BaseDataModel FMaterialId { get; set; } = new BaseDataModel();
-        public BaseDataModel FUnitId { get; set; } = new BaseDataModel();
-        public BaseDataModel FBaseUnitId { get; set; } = new BaseDataModel();
-        public decimal FAppQty { get; set; }       // 申请退货数量
-        public decimal FBaseAppQty { get; set; }   // 计基本申请退货数量
-        public BaseDataModel FStockId { get; set; } = new BaseDataModel();
-        public BaseDataModel FStockLocId { get; set; } = new BaseDataModel();
-        public string FBatchNo { get; set; }
-        public string FSrcBillNo { get; set; }
-        public string FSrcFormId { get; set; }
-        public string FNote { get; set; }
-        public Dictionary<string, BaseDataModel> FAuxPropId { get; set; } = new Dictionary<string, BaseDataModel>();
+        public BaseDataModel FMATERIALID { get; set; } = new BaseDataModel();  // 物料
+        public BaseDataModel FUNITID { get; set; } = new BaseDataModel();      // 单位
+        public BaseDataModel FBASEUNITID { get; set; } = new BaseDataModel();  // 基本单位
+        
+        public decimal FMRAPPQTY { get; set; }     // 申请退料数量 (MRAPPQTY)
+        public decimal FBASEUNITQTY { get; set; }  // 基本单位数量 (BASEUNITQTY)
+        
+        public BaseDataModel FStockId { get; set; } = new BaseDataModel();     // 仓库
+        public string FLot { get; set; }                                       // 批号文本
+        public string FSRCBILLNO { get; set; }                                 // 源单编号
+        public string FSRCBILLTYPEID { get; set; }                             // 源单类型
+        public string FNOTE_M { get; set; }                                    // 行备注
+        
         public List<PurMtrlReturnAppEntryLinkModel> FEntity_Link { get; set; } = new List<PurMtrlReturnAppEntryLinkModel>();
     }
 
@@ -74,7 +75,5 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public string FEntity_Link_FSTableName { get; set; } = "";
         public long FEntity_Link_FSBillId { get; set; }
         public long FEntity_Link_FSId { get; set; }
-        public string FEntity_Link_FBaseAppQtyOld { get; set; } = "0";
-        public string FEntity_Link_FBaseAppQty { get; set; } = "0";
     }
 }

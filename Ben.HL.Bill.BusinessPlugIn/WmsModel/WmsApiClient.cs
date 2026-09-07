@@ -18,15 +18,17 @@ namespace Ben.HL.Bill.BusinessPlugIn
         /// <returns>接口响应内容；非成功状态码返回 "HTTP {StatusCode}: {响应}"</returns>
         public string CallWmsApi(string apiUrl, string jsonData, int timeoutSeconds = 30)
         {
+            return PostJson(apiUrl, jsonData, timeoutSeconds);
+        }
+
+        public string PostJson(string apiUrl, string jsonData, int timeoutSeconds = 30)
+        {
             try
             {
                 using (var client = new HttpClient())
                 {
                     client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
                     client.DefaultRequestHeaders.Add("Accept", "application/json");
-
-                    // 如果WMS需要认证，在这里添加
-                    // client.DefaultRequestHeaders.Add("Authorization", "Bearer your-token");
 
                     var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
                     var task = client.PostAsync(apiUrl, content);
@@ -35,20 +37,18 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     var response = task.Result;
                     var responseContent = response.Content.ReadAsStringAsync();
                     responseContent.Wait();
+                    string result = responseContent.Result;
 
-                    if (response.IsSuccessStatusCode)
+                    if (!response.IsSuccessStatusCode)
                     {
-                        return responseContent.Result;
+                        throw new Exception($"HTTP {response.StatusCode}: {result}");
                     }
-                    else
-                    {
-                        return $"HTTP {response.StatusCode}: {responseContent.Result}";
-                    }
+                    return result;
                 }
             }
             catch (Exception ex)
             {
-                throw new Exception($"调用WMS接口异常: {ex.Message}");
+                throw new Exception($"调用接口异常: {ex.Message}", ex);
             }
         }
     }
