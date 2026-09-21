@@ -23,46 +23,40 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.AfterDoOperation(e);
 
-            if (!e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("Save", StringComparison.OrdinalIgnoreCase))
             {
-                return;
-            }
-
-            try
-            {
-                DynamicObject billObj = this.Model.DataObject;
-                if (billObj == null)
+                try
                 {
-                    this.View.ShowMessage("没有找到需要推送的单据数据");
-                    return;
+                    DynamicObject billObj = this.Model.DataObject;
+                    if (billObj == null)
+                    {
+                        this.View.ShowMessage("没有找到需要推送的单据数据");
+                        return;
+                    }
+                    IntegrationConfig config = IntegrationConfig.Load();
+                    List<ReceiveEntrySource> entries = GetEntrySources(billObj);
+                    Dictionary<string, string> materialOrgValues = QueryMaterialOrgValues(config, entries);
+                    HashSet<string> wmsOrgValues = new HashSet<string>(config.WmsOrgValues, StringComparer.OrdinalIgnoreCase);
+                    List<ReceiveEntrySource> wmsEntries = entries.Where(entry => materialOrgValues.ContainsKey(entry.MaterialId)&& IsWmsValue(materialOrgValues[entry.MaterialId], wmsOrgValues)).ToList();
+
+                    WmsSaveReceiveBillRequestModel wmsRequest = BuildStandardApiRequest(billObj, entries);
+                    string wmsJson = Serialize(wmsRequest);
+                    _apiClient.PostJson(config.WmsReceiveBillApiUrl, wmsJson);
+
+                    if (wmsEntries.Count == 0)
+                    {
+                        this.View.ShowMessage("WMS推送成功；没有需要回写SRM的WMS管辖分录");
+                        return;
+                    }
+
+                    SrmReceiveRequestModel srmRequest = BuildSrmRequest(billObj, wmsEntries, config);
+                    string srmResponse = _apiClient.PostJson(config.SrmApiUrl, Serialize(srmRequest));
+                    this.View.ShowMessage(string.Format("WMS推送成功，SRM批量回写成功，共{0}条。SRM返回：{1}", wmsEntries.Count, srmResponse));
                 }
-
-                IntegrationConfig config = IntegrationConfig.Load();
-                List<ReceiveEntrySource> entries = GetEntrySources(billObj);
-                Dictionary<string, string> materialOrgValues = QueryMaterialOrgValues(config, entries);
-                HashSet<string> wmsOrgValues = new HashSet<string>(config.WmsOrgValues, StringComparer.OrdinalIgnoreCase);
-                List<ReceiveEntrySource> wmsEntries = entries
-                    .Where(entry => materialOrgValues.ContainsKey(entry.MaterialId)
-                        && IsWmsValue(materialOrgValues[entry.MaterialId], wmsOrgValues))
-                    .ToList();
-
-                WmsSaveReceiveBillRequestModel wmsRequest = BuildStandardApiRequest(billObj, entries);
-                string wmsJson = Serialize(wmsRequest);
-                _apiClient.PostJson(config.WmsApiUrl, wmsJson);
-
-                if (wmsEntries.Count == 0)
+                catch (Exception ex)
                 {
-                    this.View.ShowMessage("WMS推送成功；没有需要回写SRM的WMS管辖分录");
-                    return;
+                    this.View.ShowMessage("收料通知单联动处理异常：" + ex.Message);
                 }
-
-                SrmReceiveRequestModel srmRequest = BuildSrmRequest(billObj, wmsEntries, config);
-                string srmResponse = _apiClient.PostJson(config.SrmApiUrl, Serialize(srmRequest));
-                this.View.ShowMessage(string.Format("WMS推送成功，SRM批量回写成功，共{0}条。SRM返回：{1}", wmsEntries.Count, srmResponse));
-            }
-            catch (Exception ex)
-            {
-                this.View.ShowMessage("收料通知单联动处理异常：" + ex.Message);
             }
         }
 
@@ -70,7 +64,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             List<string> materialIds = entries.Select(entry => entry.MaterialId).Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList();
             var result = new Dictionary<string, string>();
-            if (materialIds.Count == 0)
+            //if (materialIds.Count == 0)
+            if (materialIds.Count != 0)
             {
                 return result;
             }
@@ -146,7 +141,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             header.FOwnerTypeIdHead = GetValue(billObj, "OwnerTypeIdHead");
             header.F_PVCE_Combo = GetValue(billObj, "F_PVCE_Combo");
             header.FNote = GetValue(billObj, "Note");
-            header.FBillTypeID.FNumber = GetBillTypeNumber(billObj);
+            SetBaseDataNumber(billObj, "BillTypeId", header.FBillTypeID);
             SetBaseDataNumber(billObj, "StockOrgId", header.FStockOrgId);
             SetBaseDataNumber(billObj, "PurOrgId", header.FPurOrgId);
             SetBaseDataNumber(billObj, "SupplierId", header.FSupplierId);

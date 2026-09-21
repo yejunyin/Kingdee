@@ -14,15 +14,14 @@ namespace Ben.HL.Bill.BusinessPlugIn
     [Description("退料申请单审核推送WMS-Ben")]
     public class PushPurMtrlReturnAppToWMS : AbstractBillPlugIn
     {
-        private const string WMS_API_URL = "http://your-wms-api.com/api/pur_mrapp";
         private WmsApiClient _pushService = new WmsApiClient();
 
         public override void AfterDoOperation(AfterDoOperationEventArgs e)
         {
             base.AfterDoOperation(e);
 
-            //if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
-            //{
+            if (e.Operation.Operation.Equals("Save", StringComparison.OrdinalIgnoreCase))
+            {
                 try
                 {
                     DynamicObject billObj = this.Model.DataObject;
@@ -40,16 +39,17 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         Formatting = Formatting.Indented
                     });
 
-                    ShowClientMessage($"推送退料申请单数据长度：{jsonData.Length} 字符");
+                    //ShowClientMessage($"推送退料申请单数据长度：{jsonData.Length} 字符");
+                    IntegrationConfig config = IntegrationConfig.Load();
 
-                    string response = _pushService.CallWmsApi(WMS_API_URL, jsonData);
-                    ShowClientMessage($"WMS接口返回：{response}");
-                }
+                    string response = _pushService.CallWmsApi(config.WmsPurMtrlReturnApiUrl, jsonData);
+                        ShowClientMessage($"WMS接口返回：{response}");
+                    }
                 catch (Exception ex)
                 {
                     ShowClientMessage($"推送WMS异常：{ex.Message}");
                 }
-            //}
+            }
         }
 
         private PurMtrlReturnAppSaveRequestModel BuildStandardApiRequest(DynamicObject billObj)

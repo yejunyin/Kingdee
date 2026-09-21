@@ -5,75 +5,61 @@ using Kingdee.BOS;
 using Kingdee.BOS.Core.Bill.PlugIn;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
 using Kingdee.BOS.Orm.DataEntity;
-using Kingdee.BOS.Util;
 using Newtonsoft.Json;
+using Kingdee.BOS.Util;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
     /// <summary>
-    /// 生产入库单审核后按金蝶标准API格式推送WMS
+    /// 生产入库单审核后按金蝶标准API格式推送WMS（支持WMS回写生产入库单）
     /// </summary>
     [HotUpdate]
     [Description("生产入库单审核推送WMS-Ben")]
     public class PushPrdInStockToWMS : AbstractBillPlugIn
     {
-        private const string WMS_API_URL = "http://your-wms-api.com/api/prd_instock";
-        private WmsApiClient _pushService = new WmsApiClient();
+        private readonly WmsApiClient _apiClient = new WmsApiClient();
 
         public override void AfterDoOperation(AfterDoOperationEventArgs e)
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            if (!e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
             {
-                try
+                return;
+            }
+
+            try
+            {
+                DynamicObject billObj = this.Model.DataObject;
+                if (billObj == null)
                 {
-                    DynamicObject billObj = this.Model.DataObject;
-                    if (billObj == null)
-                    {
-                        this.View.ShowMessage("没有找到需要推送的单据数据");
-                        return;
-                    }
-
-                    PrdInStockSaveRequestModel request = BuildStandardApiRequest(billObj);
-
-                    string jsonData = JsonConvert.SerializeObject(request, new JsonSerializerSettings
-                    {
-                        NullValueHandling = NullValueHandling.Ignore,
-                        Formatting = Formatting.Indented
-                    });
-
-                    this.View.ShowMessage($"推送生产入库单数据长度：{jsonData.Length} 字符");
-
-                    string response = _pushService.CallWmsApi(WMS_API_URL, jsonData);
-                    this.View.ShowMessage($"WMS接口返回：{response}");
+                    this.View.ShowMessage("没有找到需要推送的单据数据");
+                    return;
                 }
-                catch (Exception ex)
-                {
-                    this.View.ShowMessage($"推送WMS异常：{ex.Message}");
-                }
+
+                IntegrationConfig config = IntegrationConfig.Load();
+                PrdInStockSaveRequestModel wmsRequest = BuildStandardApiRequest(billObj);
+                string jsonData = Serialize(wmsRequest);
+
+                string response = _apiClient.PostJson(config.WmsPrdInStockApiUrl, jsonData);
+                this.View.ShowMessage("生产入库单推送WMS成功。WMS返回：" + response);
+            }
+            catch (Exception ex)
+            {
+                this.View.ShowMessage("生产入库单推送WMS异常：" + ex.Message);
             }
         }
 
         private PrdInStockSaveRequestModel BuildStandardApiRequest(DynamicObject billObj)
         {
             var request = new PrdInStockSaveRequestModel();
-            var header = request.data.Model;
+            PrdInStockHeaderModel header = request.data.Model;
 
-            if (billObj.Contains("Id") && billObj["Id"] != null) header.FID = Convert.ToInt64(billObj["Id"]);
-            if (billObj.Contains("BillNo") && billObj["BillNo"] != null) header.FBillNo = billObj["BillNo"].ToString();
-
-            if (billObj.Contains("FDate") && billObj["FDate"] != null)
-            {
-                DateTime dateVal;
-                if (DateTime.TryParse(billObj["FDate"].ToString(), out dateVal))
-                    header.FDate = dateVal.ToString("yyyy-MM-dd HH:mm:ss");
-                else
-                    header.FDate = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-            }
-
-            if (billObj.Contains("FOwnerTypeIdHead") && billObj["FOwnerTypeIdHead"] != null) header.FOwnerTypeIdHead = billObj["FOwnerTypeIdHead"].ToString();
-            if (billObj.Contains("FDescription") && billObj["FDescription"] != null) header.FDescription = billObj["FDescription"].ToString();
+            header.FID = GetLong(billObj, "Id");
+            header.FBillNo = GetValue(billObj, "BillNo");
+            header.FDate = GetDate(billObj, "FDate");
+            header.FOwnerTypeIdHead = GetValue(billObj, "FOwnerTypeIdHead");
+            header.FDescription = GetValue(billObj, "FDescription");
 
             SetBaseDataNumber(billObj, "FBillTypeID", header.FBillTypeID);
             SetBaseDataNumber(billObj, "FPrdOrgId", header.FPrdOrgId);
@@ -82,52 +68,47 @@ namespace Ben.HL.Bill.BusinessPlugIn
             SetBaseDataNumber(billObj, "FOwnerIdHead", header.FOwnerIdHead);
 
             header.FEntity = BuildDetailEntityList(billObj);
-
             return request;
         }
 
         private List<PrdInStockEntryModel> BuildDetailEntityList(DynamicObject billObj)
         {
-            var detailList = new List<PrdInStockEntryModel>();
-
-            if (billObj.Contains("FEntity") && billObj["FEntity"] != null)
+            var result = new List<PrdInStockEntryModel>();
+            DynamicObjectCollection rows = billObj["FEntity"] as DynamicObjectCollection;
+            if (rows == null)
             {
-                DynamicObjectCollection detailEntity = billObj["FEntity"] as DynamicObjectCollection;
-                if (detailEntity != null && detailEntity.Count > 0)
-                {
-                    int seq = 1;
-                    foreach (DynamicObject row in detailEntity)
-                    {
-                        if (row == null) continue;
-
-                        var entry = new PrdInStockEntryModel();
-                        entry.FSeq = seq++;
-
-                        if (row.Contains("Id") && row["Id"] != null) entry.FEntryID = Convert.ToInt32(row["Id"]);
-                        if (row.Contains("FRealQty") && row["FRealQty"] != null) entry.FRealQty = Convert.ToDecimal(row["FRealQty"]);
-                        if (row.Contains("FBaseRealQty") && row["FBaseRealQty"] != null) entry.FBaseRealQty = Convert.ToDecimal(row["FBaseRealQty"]);
-
-                        if (row.Contains("FBatchNo") && row["FBatchNo"] != null) entry.FBatchNo = row["FBatchNo"].ToString();
-                        if (row.Contains("FMoBillNo") && row["FMoBillNo"] != null) entry.FMoBillNo = row["FMoBillNo"].ToString();
-                        if (row.Contains("FSrcBillNo") && row["FSrcBillNo"] != null) entry.FSrcBillNo = row["FSrcBillNo"].ToString();
-                        if (row.Contains("FSrcFormId") && row["FSrcFormId"] != null) entry.FSrcFormId = row["FSrcFormId"].ToString();
-
-                        SetBaseDataNumber(row, "FMaterialId", entry.FMaterialId);
-                        SetBaseDataNumber(row, "FUnitId", entry.FUnitId);
-                        SetBaseDataNumber(row, "FBaseUnitId", entry.FBaseUnitId);
-                        SetBaseDataNumber(row, "FStockId", entry.FStockId);
-                        SetBaseDataNumber(row, "FStockLocId", entry.FStockLocId);
-                        SetBaseDataNumber(row, "FStockStatusId", entry.FStockStatusId);
-
-                        entry.FAuxPropId = BuildAuxPropData(row);
-                        entry.FEntity_Link = GetLinkData(row);
-
-                        detailList.Add(entry);
-                    }
-                }
+                return result;
             }
 
-            return detailList;
+            int seq = 1;
+            foreach (DynamicObject row in rows)
+            {
+                if (row == null) continue;
+
+                var entry = new PrdInStockEntryModel
+                {
+                    FSeq = seq++,
+                    FEntryID = Convert.ToInt32(GetLong(row, "Id")),
+                    FRealQty = GetDecimal(row, "FRealQty"),
+                    FBaseRealQty = GetDecimal(row, "FBaseRealQty"),
+                    FBatchNo = GetValue(row, "FBatchNo"),
+                    FMoBillNo = GetValue(row, "FMoBillNo"),
+                    FSrcBillNo = GetValue(row, "FSrcBillNo"),
+                    FSrcFormId = GetValue(row, "FSrcFormId"),
+                    FAuxPropId = BuildAuxPropData(row),
+                    FEntity_Link = GetLinkData(row)
+                };
+
+                SetBaseDataNumber(row, "FMaterialId", entry.FMaterialId);
+                SetBaseDataNumber(row, "FUnitId", entry.FUnitId);
+                SetBaseDataNumber(row, "FBaseUnitId", entry.FBaseUnitId);
+                SetBaseDataNumber(row, "FStockId", entry.FStockId);
+                SetBaseDataNumber(row, "FStockLocId", entry.FStockLocId);
+                SetBaseDataNumber(row, "FStockStatusId", entry.FStockStatusId);
+
+                result.Add(entry);
+            }
+            return result;
         }
 
         private Dictionary<string, BaseDataModel> BuildAuxPropData(DynamicObject row)
@@ -139,73 +120,91 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 "FAUXPROPID__FF100004", "FAUXPROPID__FF100005", "FAUXPROPID__FF100006"
             };
 
-            if (row != null && row.Contains("FAuxPropId") && row["FAuxPropId"] != null)
+            DynamicObject auxPropObj = row == null ? null : row["FAuxPropId"] as DynamicObject;
+            foreach (string field in auxFields)
             {
-                DynamicObject auxPropObj = row["FAuxPropId"] as DynamicObject;
-                if (auxPropObj != null)
+                var baseData = new BaseDataModel();
+                if (auxPropObj != null && auxPropObj.Contains(field) && auxPropObj[field] != null)
                 {
-                    foreach (string field in auxFields)
+                    DynamicObject ffPropObj = auxPropObj[field] as DynamicObject;
+                    if (ffPropObj != null)
                     {
-                        var baseData = new BaseDataModel();
-                        if (auxPropObj.Contains(field) && auxPropObj[field] != null)
-                        {
-                            DynamicObject ffPropObj = auxPropObj[field] as DynamicObject;
-                            if (ffPropObj != null && ffPropObj.Contains("FNumber") && ffPropObj["FNumber"] != null)
-                            {
-                                baseData.FNumber = ffPropObj["FNumber"].ToString();
-                            }
-                        }
-                        auxPropDict[field] = baseData;
+                        baseData.FNumber = GetValue(ffPropObj, "FNumber");
                     }
-                    return auxPropDict;
                 }
+                auxPropDict[field] = baseData;
             }
-
-            foreach (string field in auxFields) auxPropDict[field] = new BaseDataModel();
             return auxPropDict;
         }
 
         private List<PrdInStockEntryLinkModel> GetLinkData(DynamicObject row)
         {
-            var linkList = new List<PrdInStockEntryLinkModel>();
-
-            if (row != null && row.Contains("FEntity_Link") && row["FEntity_Link"] != null)
+            var result = new List<PrdInStockEntryLinkModel>();
+            DynamicObjectCollection links = row == null ? null : row["FEntity_Link"] as DynamicObjectCollection;
+            if (links == null)
             {
-                DynamicObjectCollection links = row["FEntity_Link"] as DynamicObjectCollection;
-                if (links != null && links.Count > 0)
-                {
-                    foreach (DynamicObject link in links)
-                    {
-                        if (link == null) continue;
-
-                        var linkData = new PrdInStockEntryLinkModel();
-
-                        if (link.Contains("FlowId") && link["FlowId"] != null) linkData.FEntity_Link_FFlowId = link["FlowId"].ToString();
-                        if (link.Contains("FFlowLineId") && link["FFlowLineId"] != null) linkData.FEntity_Link_FFlowLineId = link["FFlowLineId"].ToString();
-                        if (link.Contains("FRuleId") && link["FRuleId"] != null) linkData.FEntity_Link_FRuleId = link["FRuleId"].ToString();
-                        if (link.Contains("FSTableName") && link["FSTableName"] != null) linkData.FEntity_Link_FSTableName = link["FSTableName"].ToString();
-                        if (link.Contains("FSBillId") && link["FSBillId"] != null) linkData.FEntity_Link_FSBillId = Convert.ToInt64(link["FSBillId"]);
-                        if (link.Contains("FSId") && link["FSId"] != null) linkData.FEntity_Link_FSId = Convert.ToInt64(link["FSId"]);
-
-                        linkList.Add(linkData);
-                    }
-                }
+                return result;
             }
 
-            if (linkList.Count == 0) linkList.Add(new PrdInStockEntryLinkModel());
-            return linkList;
+            foreach (DynamicObject link in links)
+            {
+                if (link == null) continue;
+
+                result.Add(new PrdInStockEntryLinkModel
+                {
+                    FEntity_Link_FFlowId = GetValue(link, "FlowId"),
+                    FEntity_Link_FFlowLineId = GetValue(link, "FFlowLineId"),
+                    FEntity_Link_FRuleId = GetValue(link, "FRuleId"),
+                    FEntity_Link_FSTableName = GetValue(link, "FSTableName"),
+                    FEntity_Link_FSBillId = GetLong(link, "FSBillId"),
+                    FEntity_Link_FSId = GetLong(link, "FSId")
+                });
+            }
+            return result;
         }
 
-        private void SetBaseDataNumber(DynamicObject sourceObj, string fieldName, BaseDataModel targetModel)
+        /// <summary>
+        /// 安全提取 DynamicObject 基础资料中的 FNumber
+        /// </summary>
+        private void SetBaseDataNumber(DynamicObject source, string fieldName, BaseDataModel target)
         {
-            if (sourceObj != null && targetModel != null && sourceObj.Contains(fieldName) && sourceObj[fieldName] != null)
+            DynamicObject value = source == null ? null : source[fieldName] as DynamicObject;
+            target.FNumber = GetValue(value, "Number");
+        }
+
+        private string GetValue(DynamicObject source, string fieldName)
+        {
+            return source != null && source.Contains(fieldName) && source[fieldName] != null
+                ? source[fieldName].ToString()
+                : string.Empty;
+        }
+
+        private long GetLong(DynamicObject source, string fieldName)
+        {
+            long value;
+            return long.TryParse(GetValue(source, fieldName), out value) ? value : 0;
+        }
+
+        private decimal GetDecimal(DynamicObject source, string fieldName)
+        {
+            decimal value;
+            return decimal.TryParse(GetValue(source, fieldName), out value) ? value : 0;
+        }
+
+        private string GetDate(DynamicObject source, string fieldName)
+        {
+            DateTime value;
+            return DateTime.TryParse(GetValue(source, fieldName), out value)
+                ? value.ToString("yyyy-MM-dd HH:mm:ss")
+                : DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        }
+
+        private string Serialize(object value)
+        {
+            return JsonConvert.SerializeObject(value, new JsonSerializerSettings
             {
-                DynamicObject baseDataObj = sourceObj[fieldName] as DynamicObject;
-                if (baseDataObj != null && baseDataObj.Contains("FNumber") && baseDataObj["FNumber"] != null)
-                {
-                    targetModel.FNumber = baseDataObj["FNumber"].ToString();
-                }
-            }
+                NullValueHandling = NullValueHandling.Ignore
+            });
         }
     }
 }

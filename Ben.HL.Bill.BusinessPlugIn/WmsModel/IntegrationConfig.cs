@@ -1,12 +1,14 @@
 using System;
-using System.Configuration;
 using System.Linq;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
     public class IntegrationConfig
     {
-        public string WmsApiUrl { get; private set; }
+        public string WmsReceiveBillApiUrl { get; private set; }
+        public string WmsPurMtrlReturnApiUrl { get; private set; }
+        public string WmsPrdInStockApiUrl { get; private set; }
+        public string WmsPrdReportFinApiUrl { get; private set; }
         public string SrmApiUrl { get; private set; }
         public string[] WmsOrgValues { get; private set; }
         public string SrmGroupCode { get; private set; }
@@ -17,12 +19,15 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             return new IntegrationConfig
             {
-                WmsApiUrl = Required("WmsApiUrl"),
-                SrmApiUrl = Required("SrmApiUrl"),
-                WmsOrgValues = ParseWmsOrgValues(Required("WmsOrgValues")), 
-                SrmGroupCode = Required("SrmGroupCode"),
-                SrmUserCode = Required("SrmUserCode"),
-                SrmDepartmentCode = Required("SrmDepartmentCode")
+                WmsReceiveBillApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/purchaseReceipt/push",
+                WmsPurMtrlReturnApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/purchaseReturn/push",
+                WmsPrdInStockApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/productionInstock/push",
+                WmsPrdReportFinApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/productionReport/push",
+                SrmApiUrl = "http://your-srm-api.com/api/receive/batch",
+                WmsOrgValues = ParseWmsOrgValues("your-wms-org-id"),
+                SrmGroupCode = "your-wms-org-id",
+                SrmUserCode = "your-wms-org-id",
+                SrmDepartmentCode = "your-wms-org-id"
             };
         }
 
@@ -33,16 +38,6 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     .Select(item => item.Trim())
                     .Where(item => item.Length > 0)
                     .ToArray();
-        }
-
-        private static string Required(string key)
-        {
-            string value = ConfigurationManager.AppSettings[key];
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                throw new ConfigurationErrorsException("缺少配置项：" + key);
-            }
-            return value.Trim();
         }
     }
 }

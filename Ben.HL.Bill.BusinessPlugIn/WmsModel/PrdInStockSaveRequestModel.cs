@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
@@ -59,7 +59,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public string FBatchNo { get; set; }
         public string FMoBillNo { get; set; }      // 生产订单号
         public string FSrcBillNo { get; set; }
-        public string FSrcFormId { get; set; }
+        public string FSrcFormId { get; set; } = "PRD_PrdOrder";
         public Dictionary<string, BaseDataModel> FAuxPropId { get; set; } = new Dictionary<string, BaseDataModel>();
         public List<PrdInStockEntryLinkModel> FEntity_Link { get; set; } = new List<PrdInStockEntryLinkModel>();
     }
@@ -69,8 +69,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
     {
         public string FEntity_Link_FFlowId { get; set; } = "";
         public string FEntity_Link_FFlowLineId { get; set; } = "";
-        public string FEntity_Link_FRuleId { get; set; } = "";
-        public string FEntity_Link_FSTableName { get; set; } = "";
+        public string FEntity_Link_FRuleId { get; set; } = "PRD_PrdOrder-PRD_InStock";
+        public string FEntity_Link_FSTableName { get; set; } = "t_PRD_PrdOrderEntry";
         public long FEntity_Link_FSBillId { get; set; }
         public long FEntity_Link_FSId { get; set; }
         public string FEntity_Link_FBaseRealQtyOld { get; set; } = "0";

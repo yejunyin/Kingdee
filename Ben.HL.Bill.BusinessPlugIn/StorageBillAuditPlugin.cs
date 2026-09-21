@@ -49,7 +49,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 foreach (var row in entryRows)
                 {
                     // 获取关联的发运计划明细/源单分录内码
-                    long planEntryId = Convert.ToInt64(row["F_BHD_DeliveryPlanId"]);
+                    long planEntryId = Convert.ToInt64(row["F_BHD_SrcEntryId"]);
 
                     if (planEntryId > 0 && !planEntryIds.Contains(planEntryId))
                     {
