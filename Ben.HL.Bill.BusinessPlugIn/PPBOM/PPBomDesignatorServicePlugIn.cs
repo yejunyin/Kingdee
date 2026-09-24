@@ -1,240 +1,195 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
 using System.Linq;
-using Kingdee.BOS;
+using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Core.DynamicForm.PlugIn;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
-using Kingdee.BOS.Log;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.Util;
-using System.ComponentModel;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
-    /// <summary>
-    /// 生产用料清单（PRD_PPBOM）位号回填服务插件。
-    ///
-    /// 功能：
-    ///   生产订单按 BOM 展开生成生产用料清单时，依据用料清单表头的 BOM 版本（FBOMID），
-    ///   把该 BOM 子项（物料清单）上对应物料的位号 F_BHD_Designator 回填到用料清单子项上。
-    ///
-    /// 注册位置：
-    ///   生产用料清单 → 保存（Save）操作。
-    ///   若你的环境在【审核】时才落用料清单，请同时把本插件注册到 Audit 操作（逻辑幂等，重复执行无副作用）。
-    ///
-    /// 匹配策略（见 DesignatorHelper 说明）：
-    ///   1) 用料清单子项 FBOMENTRYID == BOM 子项 FENTRYID —— 精确匹配，规避同料号多行串位号
-    ///   2) (表头 FBOMID, 子项 FMATERIALID) 组合键 —— 兜底
-    ///
-    /// 幂等性：
-    ///   默认只填充空白位号，不覆盖已有值（OverwriteExisting = false）。
-    ///   因此本插件可安全注册到多个操作，也可重复执行。
-    /// </summary>
     [HotUpdate]
     [Description("生产用料清单（PRD_PPBOM）位号回填服务插件")]
     public class PPBomDesignatorServicePlugIn : AbstractOperationServicePlugIn
     {
-        /// <summary>
-        /// 是否覆盖用料清单上已有的位号。
-        /// false（默认）：只补空白，人工维护过的位号不会被冲掉。
-        /// true：一律以 BOM 为准重写。
-        /// </summary>
-        private const bool OverwriteExisting = false;
-
-        /// <summary>
-        /// 回填失败时是否中断保存。
-        /// false（默认）：仅记录日志。位号属辅助工艺信息，不阻断业务单据保存。
-        /// 若车间强依赖位号、缺失会导致错料，建议改为 true 并配合下面的严格校验。
-        /// </summary>
-        private const bool ThrowOnFailure = false;
-
-        /// <summary>
-        /// 保存后是否校验"凡是 BOM 有位号的子项，用料清单都必须有位号"。
-        /// 打开后若有漏填会记 Error 级日志（ThrowOnFailure = true 时直接抛异常）。
-        /// </summary>
-        private const bool ValidateAfterFill = true;
-
-        /// <summary>声明需要加载的字段。不声明则取值恒为 null。</summary>
         public override void OnPreparePropertys(PreparePropertysEventArgs e)
         {
             base.OnPreparePropertys(e);
-
-            e.FieldKeys.Add("FBomId");              // 表头：BOM 版本
-            e.FieldKeys.Add("FMaterialId");         // 子项：子项物料
-            e.FieldKeys.Add("FBOMENTRYID");         // 子项：BOM 分录内码（精确匹配键）
-            e.FieldKeys.Add(DesignatorHelper.DesignatorField); // 子项：位号
+            e.FieldKeys.Add("FMaterialID");       // 物料 ID
+            e.FieldKeys.Add("FBOMID");            // 用料 BOM ID
+            e.FieldKeys.Add("FMoId");             // 生产订单 ID
+            e.FieldKeys.Add("FMoEntryId");        // 生产订单分录 ID
+            e.FieldKeys.Add("F_BHD_Designator");  // 自定义位号 Key
         }
 
-        /// <summary>
-        /// 事务内处理：标准逻辑已把用料清单数据装配完毕，此处补位号后随保存一并落库。
-        /// 查询走 DBUtils（事务内允许），不可使用 ORM 查询服务，否则报"事务中不允许查询"。
-        /// </summary>
         public override void BeginOperationTransaction(BeginOperationTransactionArgs e)
         {
             base.BeginOperationTransaction(e);
 
-            if (e.DataEntitys == null || e.DataEntitys.Length == 0)
-            {
-                return;
-            }
+            if (e.DataEntitys == null || !e.DataEntitys.Any()) return;
 
-            try
+            foreach (DynamicObject dataObj in e.DataEntitys)
             {
-                FillDesignators(e.DataEntitys);
-            }
-            catch (Exception ex)
-            {
-                // 位号回填属增强逻辑，默认不阻断保存，仅记录以便排查。
-                Logger.Error(DesignatorHelper.LogTitle, "位号回填异常：" + ex.Message, ex);
+                DynamicObjectCollection entryRows = dataObj["PPBOMENTRY"] as DynamicObjectCollection;
+                if (entryRows == null) continue;
 
-                if (ThrowOnFailure)
+                foreach (DynamicObject row in entryRows)
                 {
-                    throw new KDBusinessException("BHD_PPBOM_DESIGNATOR", "位号回填失败：" + ex.Message);
-                }
-            }
-        }
+                    // 1. 获取子物料 ID (数据中的 MaterialID_Id)
+                    long materialId = GetValueLong(row, "MaterialID_Id", "MaterialID");
+                    if (materialId == 0) continue;
 
-        /// <summary>核心回填逻辑。</summary>
-        private void FillDesignators(IEnumerable<DynamicObject> bills)
-        {
-            var billList = bills.Where(b => b != null).ToList();
-            if (billList.Count == 0)
-            {
-                return;
-            }
+                    // 2. 获取用料行绑定的 BOMID，若为 0 则从生产订单（MoEntryId）追溯生产 BOM
+                    long bomId = GetValueLong(row, "BOMID_Id", "BOMID");
+                    long moEntryId = GetValueLong(row, "MoEntryId");
 
-            // 1. 收集本次涉及的全部 BOM 版本内码
-            var bomIds = new List<long>();
-            foreach (DynamicObject bill in billList)
-            {
-                long bomId = DesignatorHelper.GetBomId(bill);
-                if (bomId > 0L)
-                {
-                    bomIds.Add(bomId);
-                }
-            }
-
-            if (bomIds.Count == 0)
-            {
-                // 表头无 BOM 版本，通常是用料清单未按 BOM 展开（如仅主产品/手工新增），无需处理。
-                Logger.Info(DesignatorHelper.LogTitle, "单据表头未取到 BOM 版本（FBOMID），跳过位号回填。");
-                return;
-            }
-
-            // 2. 一次性取回位号字典（两个维度各查一次，避免逐行查库）
-            Dictionary<long, string> byBomEntryId =
-                DesignatorHelper.LoadDesignatorsByBomEntryId(this.Context, bomIds);
-            Dictionary<string, string> byMaterial =
-                DesignatorHelper.LoadDesignatorsByMaterial(this.Context, bomIds);
-
-            if (byBomEntryId.Count == 0 && byMaterial.Count == 0)
-            {
-                Logger.Info(DesignatorHelper.LogTitle,
-                    "BOM 子项未维护位号（BOM 内码：" + string.Join(",", bomIds.Distinct()) + "），跳过回填。");
-                return;
-            }
-
-            // 3. 逐单、逐行回填
-            int filled = 0;
-            int skipped = 0;
-            int missing = 0;
-            string resolvedEntryKey = null;
-
-            foreach (DynamicObject bill in billList)
-            {
-                long bomId = DesignatorHelper.GetBomId(bill);
-                if (bomId <= 0L)
-                {
-                    continue;
-                }
-
-                string entryKey;
-                DynamicObjectCollection entries =
-                    DesignatorHelper.GetDesignatorEntryCollection(bill, out entryKey);
-                if (entries == null)
-                {
-                    Logger.Info(DesignatorHelper.LogTitle,
-                        "未定位到承载位号字段的子单据体，请检查用料清单是否已添加 " + DesignatorHelper.DesignatorField + " 字段。");
-                    continue;
-                }
-
-                resolvedEntryKey = entryKey;
-
-                foreach (DynamicObject entry in entries)
-                {
-                    if (entry == null)
+                    if (bomId == 0 && moEntryId > 0)
                     {
-                        continue;
+                        bomId = GetBomIdFromMoEntry(moEntryId);
                     }
 
-                    string current = DesignatorHelper.GetString(entry, DesignatorHelper.DesignatorField);
-                    if (!OverwriteExisting && !string.IsNullOrWhiteSpace(current))
+                    // 3. 若仍未找到 BOMID，兜底获取该物料自身生效的默认 BOMID
+                    if (bomId == 0)
                     {
-                        skipped++;
-                        continue;
+                        bomId = GetDefaultBomId(materialId);
                     }
 
-                    string designator = ResolveDesignator(entry, bomId, byBomEntryId, byMaterial);
-                    if (string.IsNullOrWhiteSpace(designator))
+                    // 4. 从工程 BOM 的 T_ENG_BOMCHILD 子项明细表查询对应的位号
+                    if (bomId > 0)
                     {
-                        missing++;
-                        continue;
-                    }
+                        HashSet<string> designatorSet = new HashSet<string>();
+                        HashSet<long> visitedBomIds = new HashSet<long>();
 
-                    if (DesignatorHelper.SetString(entry, DesignatorHelper.DesignatorField, designator))
-                    {
-                        filled++;
+                        GetDesignatorsFromBomChild(bomId, materialId, designatorSet, visitedBomIds);
+
+                        // 5. 将解析出的位号回写到生产用料清单的表体字段中
+                        if (designatorSet.Count > 0)
+                        {
+                            row["F_BHD_Designator"] = string.Join(",", designatorSet);
+                        }
                     }
                 }
-            }
-
-            string summary = string.Format(
-                "位号回填完成：填充 {0} 行，保留原值 {1} 行，BOM 无位号 {2} 行（表体实体 {3}）。",
-                filled, skipped, missing,
-                resolvedEntryKey ?? "未识别");
-
-            Logger.Info(DesignatorHelper.LogTitle, summary);
-
-            if (ValidateAfterFill && ThrowOnFailure && missing > 0)
-            {
-                throw new KDBusinessException("BHD_PPBOM_DESIGNATOR",
-                    string.Format("有 {0} 行子项在 BOM 中未维护位号，无法带出，请先完善 BOM 位号。", missing));
             }
         }
 
         /// <summary>
-        /// 单个子项行的位号解析：先精确匹配 BOM 子项内码，再退回物料维度匹配。
+        /// 从生产订单明细（T_PRD_MOENTRY）中获取生产下达时选择的 BOMID
         /// </summary>
-        private static string ResolveDesignator(
-            DynamicObject entry,
-            long bomId,
-            Dictionary<long, string> byBomEntryId,
-            Dictionary<string, string> byMaterial)
+        private long GetBomIdFromMoEntry(long moEntryId)
         {
-            // 优先：BOM 分录内码精确匹配
-            long bomEntryId = DesignatorHelper.GetInt64(entry, "FBOMENTRYID");
-            if (bomEntryId > 0L)
+            string sql = $"SELECT FBOMID FROM T_PRD_MOENTRY WHERE FENTRYID = {moEntryId}";
+            return DBUtils.ExecuteScalar<long>(this.Context, sql, 0, null);
+        }
+
+        /// <summary>
+        /// 使用 ExecuteDynamicObject 一次性加载数据，避免 DataReader 冲突
+        /// </summary>
+        private void GetDesignatorsFromBomChild(long bomId, long targetMaterialId, HashSet<string> designatorSet, HashSet<long> visitedBomIds)
+        {
+            if (bomId <= 0 || visitedBomIds.Contains(bomId)) return;
+            visitedBomIds.Add(bomId);
+
+            string sql = $@"
+                SELECT 
+                    C.FMATERIALID AS CHILD_MATERIALID,
+                    C.FBOMID AS CHILD_BOMID,
+                    C.F_BHD_DESIGNATOR
+                FROM T_ENG_BOM B
+                INNER JOIN T_ENG_BOMCHILD C ON B.FID = C.FID
+                WHERE B.FID = {bomId}";
+
+            // 改用 ExecuteDynamicObject，直接将数据库查询结果加载至内存集合并快速关闭连接
+            DynamicObjectCollection rows = DBUtils.ExecuteDynamicObject(this.Context, sql);
+            if (rows == null || rows.Count == 0) return;
+
+            List<long> nextLevelBomIds = new List<long>();
+
+            foreach (DynamicObject row in rows)
             {
-                string hit;
-                if (byBomEntryId.TryGetValue(bomEntryId, out hit) && !string.IsNullOrWhiteSpace(hit))
+                long childMaterialId = Convert.ToInt64(row["CHILD_MATERIALID"]);
+                string designator = row["F_BHD_DESIGNATOR"] != null ? row["F_BHD_DESIGNATOR"].ToString().Trim() : "";
+
+                // 1. 匹配目标物料并提取位号
+                if (childMaterialId == targetMaterialId && !string.IsNullOrEmpty(designator))
                 {
-                    return hit;
+                    string[] parts = designator.Split(new char[] { ',', '，', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var part in parts)
+                    {
+                        designatorSet.Add(part.Trim());
+                    }
+                }
+
+                // 2. 收集深层子 BOM ID
+                long childBomId = Convert.ToInt64(row["CHILD_BOMID"]);
+                if (childBomId == 0 && childMaterialId > 0)
+                {
+                    childBomId = GetDefaultBomId(childMaterialId);
+                }
+
+                if (childBomId > 0)
+                {
+                    nextLevelBomIds.Add(childBomId);
                 }
             }
 
-            // 兜底：BOM 内码 + 子项物料内码
-            long materialId = DesignatorHelper.GetRefId(entry, "FMaterialId");
-            if (materialId > 0L)
+            // 3. 递归展开下级 BOM（此时前面的数据库查询已完全结束，连接自由）
+            foreach (long childBomId in nextLevelBomIds)
             {
-                string hit;
-                if (byMaterial.TryGetValue(DesignatorHelper.MaterialKey(bomId, materialId), out hit)
-                    && !string.IsNullOrWhiteSpace(hit))
+                GetDesignatorsFromBomChild(childBomId, targetMaterialId, designatorSet, visitedBomIds);
+            }
+        }
+
+        /// <summary>
+        /// 查询物料当前生效的默认 BOM ID
+        /// </summary>
+        private long GetDefaultBomId(long materialId)
+        {
+            string sql = $@"
+                SELECT TOP 1 FID 
+                FROM T_ENG_BOM 
+                WHERE FMATERIALID = {materialId} 
+                  AND FDOCUMENTSTATUS = 'C' 
+                  AND FFORBIDSTATUS = 'A'
+                ORDER BY FISDEFAULT DESC, FID DESC";
+
+            return DBUtils.ExecuteScalar<long>(this.Context, sql, 0, null);
+        }
+
+        /// <summary>
+        /// 兼容旧版 C# 编译器的类型取值辅助函数
+        /// </summary>
+        private long GetValueLong(DynamicObject row, params string[] propertyNames)
+        {
+            if (row == null) return 0;
+            foreach (var prop in propertyNames)
+            {
+                if (row.DynamicObjectType.Properties.Contains(prop))
                 {
-                    return hit;
+                    object val = row[prop];
+
+                    DynamicObject dyObj = val as DynamicObject;
+                    if (dyObj != null)
+                    {
+                        if (dyObj.DynamicObjectType.Properties.Contains("Id"))
+                        {
+                            long idVal = Convert.ToInt64(dyObj["Id"]);
+                            if (idVal > 0) return idVal;
+                        }
+                    }
+                    else if (val != null && val != DBNull.Value)
+                    {
+                        long result = 0;
+                        if (long.TryParse(val.ToString(), out result) && result > 0)
+                        {
+                            return result;
+                        }
+                    }
                 }
             }
-
-            return null;
+            return 0;
         }
     }
 }
