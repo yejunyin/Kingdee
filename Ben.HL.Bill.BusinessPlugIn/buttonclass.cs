@@ -1,25 +1,24 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.ComponentModel;
+using System.Data;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Text;
-using System.Threading.Tasks;
-using Kingdee.BOS.Core.Bill.PlugIn;
-using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
-using Kingdee.BOS.Core.Permission;
-using Kingdee.BOS.Core.Report;
-using Kingdee.BOS.Orm.DataEntity;
-using Kingdee.BOS.Resource;
-using Kingdee.BOS.ServiceHelper;
-using System.ComponentModel;
-using Kingdee.BOS.Core.DynamicForm;
 using Newtonsoft.Json;
+using Kingdee.BOS.App.Data;
+using Kingdee.BOS.Core.Bill.PlugIn;
+using Kingdee.BOS.Core.DynamicForm;
+using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
+using Kingdee.BOS.Orm.DataEntity;
+using Kingdee.BOS.Util;
+using Kingdee.BOS.Core.Bill.PlugIn.Args;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
-    [Kingdee.BOS.Util.HotUpdate]
-    [Description("Ben测试-MES接口校验")]
+    [HotUpdate]
+    [Description("生产订单表单插件-MES接口校验与保存后用料清单位号回填")]
     public class buttonclass : AbstractBillPlugIn
     {
         // 标志位：是否需要阻止操作
@@ -33,79 +32,294 @@ namespace Ben.HL.Bill.BusinessPlugIn
         }
 
         /// <summary>
-        /// 拦截操作执行前的事件
+        /// 保存后事件：触发生产用料清单/单据位号回填逻辑
         /// </summary>
+        public override void AfterSave(AfterSaveEventArgs e)
+        {
+            base.AfterSave(e);
+
+            // 仅在保存成功时执行
+                try
+                {
+                    FillPPBomDesignators();
+                }
+                catch (Exception ex)
+                {
+                    // 位号回填属于附加逻辑，若报错建议提示但不一定要阻断保存流程
+                    this.View.ShowMessage($"保存成功，但更新位号时发生异常：{ex.Message}", MessageBoxType.Error);
+                }
+        }
+
+        #region 位号回填核心逻辑 (原服务插件合并)
+
+        /// <summary>
+        /// 保存后解析并回填位号
+        /// </summary>
+        private void FillPPBomDesignators()
+        {
+            DynamicObject dataObj = this.Model.DataObject;
+            if (dataObj == null) return;
+
+            // 获取当前单据的 FormId
+            string formId = this.View.BillBusinessInfo.GetForm().Id;
+
+            // 1. 如果当前界面是生产订单（PRD_MO）
+            if (formId.Equals("PRD_MO", StringComparison.OrdinalIgnoreCase))
+            {
+                long moId = Convert.ToInt64(dataObj["Id"]);
+                if (moId > 0)
+                {
+                    // 生产订单保存后，后台用料清单已生成到数据库，直接执行 SQL 更新数据库中的用料清单位号
+                    ExecuteUpdatePPBomDesignatorByMoId(moId);
+                }
+                return;
+            }
+
+            // 2. 如果当前界面是生产用料清单（PRD_PPBOM）
+            if (formId.Equals("PRD_PPBOM", StringComparison.OrdinalIgnoreCase))
+            {
+                // 尝试获取用料清单表体（标准常用 EntityKey 为 PPBOMENTRY 或 FEntity）
+                string entityKey = this.Model.BusinessInfo.GetEntity("PPBOMENTRY") != null ? "PPBOMENTRY" : "FEntity";
+                DynamicObjectCollection entryRows = dataObj[entityKey] as DynamicObjectCollection;
+
+                if (entryRows != null && entryRows.Count > 0)
+                {
+                    bool isUpdated = false;
+                    foreach (DynamicObject row in entryRows)
+                    {
+                        long materialId = GetValueLong(row, "MaterialID_Id", "MaterialID");
+                        if (materialId == 0) continue;
+
+                        long bomId = GetValueLong(row, "BOMID_Id", "BOMID");
+                        long moEntryId = GetValueLong(row, "MoEntryId");
+
+                        if (bomId == 0 && moEntryId > 0)
+                        {
+                            bomId = GetBomIdFromMoEntry(moEntryId);
+                        }
+                        if (bomId == 0)
+                        {
+                            bomId = GetDefaultBomId(materialId);
+                        }
+
+                        if (bomId > 0)
+                        {
+                            HashSet<string> designatorSet = new HashSet<string>();
+                            HashSet<long> visitedBomIds = new HashSet<long>();
+
+                            GetDesignatorsFromBomChild(bomId, materialId, designatorSet, visitedBomIds);
+
+                            if (designatorSet.Count > 0)
+                            {
+                                string designators = string.Join(",", designatorSet);
+                                row["F_BHD_Designator"] = designators;
+                                isUpdated = true;
+                            }
+                        }
+                    }
+
+                    if (isUpdated)
+                    {
+                        this.View.UpdateView("F_BHD_Designator"); // 刷新用料清单界面视图
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// 生产订单保存后，通过 MoId 追溯关联的用料清单并直接更新数据库中的位号字段
+        /// </summary>
+        private void ExecuteUpdatePPBomDesignatorByMoId(long moId)
+        {
+            string querySql = $@"
+                SELECT T2.FENTRYID, T2.FMATERIALID, T2.FBOMID, T2.FMOENTRYID
+                FROM T_PRD_PPBOM T1
+                INNER JOIN T_PRD_PPBOMENTRY T2 ON T1.FID = T2.FID
+                WHERE T1.FMOID = {moId}";
+
+            DynamicObjectCollection rows = DBUtils.ExecuteDynamicObject(this.Context, querySql);
+            if (rows == null || rows.Count == 0) return;
+
+            foreach (DynamicObject row in rows)
+            {
+                long entryId = Convert.ToInt64(row["FENTRYID"]);
+                long materialId = Convert.ToInt64(row["FMATERIALID"]);
+                long bomId = Convert.ToInt64(row["FBOMID"]);
+                long moEntryId = Convert.ToInt64(row["FMOENTRYID"]);
+
+                if (bomId == 0 && moEntryId > 0)
+                {
+                    bomId = GetBomIdFromMoEntry(moEntryId);
+                }
+                if (bomId == 0)
+                {
+                    bomId = GetDefaultBomId(materialId);
+                }
+
+                if (bomId > 0)
+                {
+                    HashSet<string> designatorSet = new HashSet<string>();
+                    HashSet<long> visitedBomIds = new HashSet<long>();
+
+                    GetDesignatorsFromBomChild(bomId, materialId, designatorSet, visitedBomIds);
+
+                    if (designatorSet.Count > 0)
+                    {
+                        string designators = string.Join(",", designatorSet);
+                        string updateSql = $"UPDATE T_PRD_PPBOMENTRY SET F_BHD_DESIGNATOR = '{designators}' WHERE FENTRYID = {entryId}";
+                        DBUtils.Execute(this.Context, updateSql);
+                    }
+                }
+            }
+        }
+
+        private long GetBomIdFromMoEntry(long moEntryId)
+        {
+            string sql = $"SELECT FBOMID FROM T_PRD_MOENTRY WHERE FENTRYID = {moEntryId}";
+            return DBUtils.ExecuteScalar<long>(this.Context, sql, 0, null);
+        }
+
+        private void GetDesignatorsFromBomChild(long bomId, long targetMaterialId, HashSet<string> designatorSet, HashSet<long> visitedBomIds)
+        {
+            if (bomId <= 0 || visitedBomIds.Contains(bomId)) return;
+            visitedBomIds.Add(bomId);
+
+            string sql = $@"
+                SELECT 
+                    C.FMATERIALID AS CHILD_MATERIALID,
+                    C.FBOMID AS CHILD_BOMID,
+                    C.F_BHD_DESIGNATOR
+                FROM T_ENG_BOM B
+                INNER JOIN T_ENG_BOMCHILD C ON B.FID = C.FID
+                WHERE B.FID = {bomId}";
+
+            DynamicObjectCollection rows = DBUtils.ExecuteDynamicObject(this.Context, sql);
+            if (rows == null || rows.Count == 0) return;
+
+            List<long> nextLevelBomIds = new List<long>();
+
+            foreach (DynamicObject row in rows)
+            {
+                long childMaterialId = Convert.ToInt64(row["CHILD_MATERIALID"]);
+                string designator = row["F_BHD_DESIGNATOR"] != null ? row["F_BHD_DESIGNATOR"].ToString().Trim() : "";
+
+                if (childMaterialId == targetMaterialId && !string.IsNullOrEmpty(designator))
+                {
+                    string[] parts = designator.Split(new char[] { ',', '，', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var part in parts)
+                    {
+                        designatorSet.Add(part.Trim());
+                    }
+                }
+
+                long childBomId = Convert.ToInt64(row["CHILD_BOMID"]);
+                if (childBomId == 0 && childMaterialId > 0)
+                {
+                    childBomId = GetDefaultBomId(childMaterialId);
+                }
+
+                if (childBomId > 0)
+                {
+                    nextLevelBomIds.Add(childBomId);
+                }
+            }
+
+            foreach (long childBomId in nextLevelBomIds)
+            {
+                GetDesignatorsFromBomChild(childBomId, targetMaterialId, designatorSet, visitedBomIds);
+            }
+        }
+
+        private long GetDefaultBomId(long materialId)
+        {
+            string sql = $@"
+                SELECT TOP 1 FID 
+                FROM T_ENG_BOM 
+                WHERE FMATERIALID = {materialId} 
+                  AND FDOCUMENTSTATUS = 'C' 
+                  AND FFORBIDSTATUS = 'A'
+                ORDER BY FISDEFAULT DESC, FID DESC";
+
+            return DBUtils.ExecuteScalar<long>(this.Context, sql, 0, null);
+        }
+
+        private long GetValueLong(DynamicObject row, params string[] propertyNames)
+        {
+            if (row == null) return 0;
+            foreach (var prop in propertyNames)
+            {
+                if (row.DynamicObjectType.Properties.Contains(prop))
+                {
+                    object val = row[prop];
+                    DynamicObject dyObj = val as DynamicObject;
+                    if (dyObj != null)
+                    {
+                        if (dyObj.DynamicObjectType.Properties.Contains("Id"))
+                        {
+                            long idVal = Convert.ToInt64(dyObj["Id"]);
+                            if (idVal > 0) return idVal;
+                        }
+                    }
+                    else if (val != null && val != DBNull.Value)
+                    {
+                        long result = 0;
+                        if (long.TryParse(val.ToString(), out result) && result > 0)
+                        {
+                            return result;
+                        }
+                    }
+                }
+            }
+            return 0;
+        }
+
+        #endregion
+
+        #region MES校验与按钮点击逻辑 (原有表单插件)
+
         public override void BeforeDoOperation(BeforeDoOperationEventArgs e)
         {
             base.BeforeDoOperation(e);
 
-            // 检查是否需要阻止操作
             if (_needBlockOperation)
             {
                 e.Cancel = true;
                 this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
-                _needBlockOperation = false; // 重置标志
+                _needBlockOperation = false;
                 return;
             }
-
-            // 可以根据操作名称进行更精细的控制
-            // 例如：只阻止"下达"操作
-            // if (e.OperationName == "Submit" && _needBlockOperation)
-            // {
-            //     e.Cancel = true;
-            //     this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
-            //     _needBlockOperation = false;
-            //     return;
-            // }
         }
 
-        /// <summary>
-        /// 工具栏按钮点击事件
-        /// </summary>
         public override void EntryBarItemClick(BarItemClickEventArgs e)
         {
             base.EntryBarItemClick(e);
 
-            // 重置标志位
             _needBlockOperation = false;
             _errorMessage = string.Empty;
 
             switch (e.BarItemKey)
             {
                 case "tbBtnToRelease":
-                    ExecuteToRelease();
-                    break;
                 case "tbBtnToStart":
                     ExecuteToRelease();
                     break;
                 case "tbBtnUndoToPlanConfirm":
-                    ExecuteUndoToPlanConfirm();
-                    break;
                 case "tbBtnUndoToPlan":
                     ExecuteUndoToPlanConfirm();
                     break;
                 default:
                     break;
             }
-
-            // 取消默认事件处理，由 BeforeDoOperation 来控制是否执行操作
-            //e.Cancel = true;
-            //return;
         }
 
-        /// <summary>
-        /// POST 请求 - 推送MES数据，检查是否可以下达
-        /// 如果MES返回code=500，则阻止下达操作
-        /// </summary>
         private void ExecuteToRelease()
         {
             try
             {
-                // 获取当前单据数据
                 DynamicObject dataPacket = this.Model.DataObject;
                 DynamicObjectCollection entrys = dataPacket["TreeEntity"] as DynamicObjectCollection;
-                // 获取生产订单号 - 请根据实际字段名修改
                 string productionOrderCode = dataPacket["BillNo"]?.ToString();
+
                 if (string.IsNullOrEmpty(productionOrderCode))
                 {
                     _needBlockOperation = true;
@@ -122,9 +336,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     return;
                 }
 
-                // 获取第一个分录的数据（根据实际业务，可能需要汇总所有分录的数量）
                 DynamicObject firstEntry = entrys[0];
-                // 获取计划生产数量 - 请根据实际字段名修改
                 int scheduledProducedUnits = Convert.ToInt32(firstEntry["Qty"]);
                 if (scheduledProducedUnits <= 0)
                 {
@@ -134,12 +346,9 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     return;
                 }
 
-                // 获取订单状态 - 请根据实际字段名修改
-                string orderERPStatus =  "下达";
-
+                string orderERPStatus = "下达";
                 string url = "http://192.168.1.6:80/iMark/v1/DBProductionOrderInfo/modifyIfNoProcessOrder";
 
-                // 构建请求体
                 var bodyData = new
                 {
                     productionOrderCode = productionOrderCode,
@@ -147,21 +356,17 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     orderERPStatus = orderERPStatus
                 };
 
-                // 序列化请求体
                 string postData = JsonConvert.SerializeObject(bodyData);
 
-                // 创建请求
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
                 request.Method = "POST";
                 request.ContentType = "application/json";
                 request.Accept = "application/json";
-                request.Timeout = 30000; // 30秒超时
+                request.Timeout = 30000;
 
-                // 添加 Authorization 头
                 string authInfo = Convert.ToBase64String(Encoding.UTF8.GetBytes("bg:bg957768"));
                 request.Headers.Add("Authorization", "Basic " + authInfo);
 
-                // 写入请求体
                 byte[] byteData = Encoding.UTF8.GetBytes(postData);
                 request.ContentLength = byteData.Length;
 
@@ -170,7 +375,6 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     requestBody.Write(byteData, 0, byteData.Length);
                 }
 
-                // 获取响应
                 using (WebResponse response = request.GetResponse())
                 {
                     using (Stream responseStream = response.GetResponseStream())
@@ -178,22 +382,15 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         using (StreamReader streamReader = new StreamReader(responseStream, Encoding.UTF8))
                         {
                             string responseData = streamReader.ReadToEnd();
-
-                            // 解析返回结果
                             var result = JsonConvert.DeserializeObject<ApiResponse>(responseData);
 
-                            // 判断返回的 Code 是否为 500
                             if (result != null && result.code == 500)
                             {
-                                // 阻止下达，显示提示信息
                                 _needBlockOperation = true;
                                 _errorMessage = string.IsNullOrEmpty(result.msg) ? "MES接口返回错误，无法下达" : result.msg;
-                                //this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
-                                //this.View.ShowErrMessage(_errorMessage);
                                 return;
                             }
 
-                            // Code 不是 500，表示校验通过，允许下达
                             if (result != null && result.success)
                             {
                                 this.View.ShowMessage("MES接口校验通过，可以下达");
@@ -208,16 +405,12 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
             catch (WebException ex)
             {
-                // 处理 HTTP 错误
                 _needBlockOperation = true;
-
                 if (ex.Response != null)
                 {
                     using (StreamReader reader = new StreamReader(ex.Response.GetResponseStream()))
                     {
                         string errorResponse = reader.ReadToEnd();
-
-                        // 尝试解析 HTTP 错误响应中的 JSON
                         try
                         {
                             var errorResult = JsonConvert.DeserializeObject<ApiResponse>(errorResponse);
@@ -245,25 +438,19 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
             catch (Exception ex)
             {
-                // 处理其他异常
                 _needBlockOperation = true;
                 _errorMessage = "执行MES校验失败：" + ex.Message;
                 this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
             }
         }
 
-        /// <summary>
-        /// GET 请求 - 查询MES数据判断是否可以反执行
-        /// </summary>
         private void ExecuteUndoToPlanConfirm()
         {
             try
             {
-                // 获取当前单据数据
                 DynamicObject dataPacket = this.Model.DataObject;
-
-                // 获取生产订单号
                 string productionOrderCode = dataPacket["BillNo"]?.ToString();
+
                 if (string.IsNullOrEmpty(productionOrderCode))
                 {
                     this.View.ShowMessage("无法获取生产订单号，请检查单据", MessageBoxType.Error);
@@ -272,58 +459,34 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
                 string url = $"http://192.168.1.6:80/iMark/v1/DBProcessOrderInfo/getDBProcessOrderInfoListByProductionOrderCode?productionOrderCode={productionOrderCode}";
 
-                // 创建请求
                 HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
                 request.Method = "GET";
                 request.ContentType = "application/json";
                 request.Accept = "application/json";
                 request.Timeout = 30000;
 
-                // 添加 Authorization 头
                 string authInfo = Convert.ToBase64String(Encoding.UTF8.GetBytes("bg:bg957768"));
                 request.Headers.Add("Authorization", "Basic " + authInfo);
 
-                // 获取响应
                 using (WebResponse response = request.GetResponse())
                 {
                     using (Stream responseStream = response.GetResponseStream())
                     {
-                        using (StreamReader streamReader = new StreamReader(responseStream, Encoding.UTF8)) 
+                        using (StreamReader streamReader = new StreamReader(responseStream, Encoding.UTF8))
                         {
                             string responseData = streamReader.ReadToEnd();
-
-                            // 反序列化为动态对象
                             dynamic result = JsonConvert.DeserializeObject(responseData);
 
-                            // 根据返回内容判断业务逻辑
-                            // TODO: 根据实际业务需求添加判断逻辑
-
-                            // 示例：如果返回的数据不为空，说明MES中已有工序订单，不允许反执行
-                            // 这里需要根据实际的返回格式来调整
                             bool hasProcessOrder = false;
-
-                            // 尝试判断是否有数据
-                            if (result != null)
+                            if (result != null && result.data != null && result.data.Count > 0)
                             {
-                                // 根据实际返回结构判断，以下是示例
-                                // 如果是数组且长度>0
-                                // if (result.data is Newtonsoft.Json.Linq.JArray array && array.Count > 0)
-                                // {
-                                //     hasProcessOrder = true;
-                                // }
-
-                                // 如果是对象且有记录
-                                 if (result.data != null && result.data.Count > 0)
-                                 {
-                                     hasProcessOrder = true;
-                                 }
+                                hasProcessOrder = true;
                             }
 
                             if (hasProcessOrder)
                             {
                                 _needBlockOperation = true;
                                 _errorMessage = "MES中已存在工序订单，不允许反执行";
-                                //this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
                                 return;
                             }
 
@@ -353,9 +516,6 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
         }
 
-        /// <summary>
-        /// API响应实体类
-        /// </summary>
         public class ApiResponse
         {
             public object data { get; set; }
@@ -364,5 +524,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             public string msg { get; set; }
             public bool success { get; set; }
         }
+
+        #endregion
     }
 }

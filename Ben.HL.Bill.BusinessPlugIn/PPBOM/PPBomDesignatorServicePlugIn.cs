@@ -33,7 +33,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
             foreach (DynamicObject dataObj in e.DataEntitys)
             {
-                DynamicObjectCollection entryRows = dataObj["PPBOMENTRY"] as DynamicObjectCollection;
+                DynamicObjectCollection entryRows = dataObj["TreeEntity"] as DynamicObjectCollection;
                 if (entryRows == null) continue;
 
                 foreach (DynamicObject row in entryRows)

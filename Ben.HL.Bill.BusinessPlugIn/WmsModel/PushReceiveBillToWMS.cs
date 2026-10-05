@@ -5,7 +5,6 @@ using System.Linq;
 using Kingdee.BOS;
 using Kingdee.BOS.Core.Bill.PlugIn;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
-using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.ServiceHelper;
 using Kingdee.BOS.Util;
@@ -23,7 +22,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Operation.Equals("Save", StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {
@@ -35,74 +34,28 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     }
                     IntegrationConfig config = IntegrationConfig.Load();
                     List<ReceiveEntrySource> entries = GetEntrySources(billObj);
-                    Dictionary<string, string> materialOrgValues = QueryMaterialOrgValues(config, entries);
-                    HashSet<string> wmsOrgValues = new HashSet<string>(config.WmsOrgValues, StringComparer.OrdinalIgnoreCase);
-                    List<ReceiveEntrySource> wmsEntries = entries.Where(entry => materialOrgValues.ContainsKey(entry.MaterialId)&& IsWmsValue(materialOrgValues[entry.MaterialId], wmsOrgValues)).ToList();
 
                     WmsSaveReceiveBillRequestModel wmsRequest = BuildStandardApiRequest(billObj, entries);
                     string wmsJson = Serialize(wmsRequest);
-                    _apiClient.PostJson(config.WmsReceiveBillApiUrl, wmsJson);
+                    string wmsResponse = _apiClient.PostJson(config.WmsReceiveBillApiUrl, wmsJson);
 
-                    if (wmsEntries.Count == 0)
+                    // HL_SRM_Source_NO不为空时才推送SRM
+                    string srmSourceNo = GetValue(billObj, "HL_SRM_Source_NO");
+                    if (string.IsNullOrWhiteSpace(srmSourceNo))
                     {
-                        this.View.ShowMessage("WMS推送成功；没有需要回写SRM的WMS管辖分录");
+                        this.View.ShowMessage(string.Format("WMS推送成功，WMS返回：{0}；HL_SRM_Source_NO为空，无需推送SRM", wmsResponse));
                         return;
                     }
 
-                    SrmReceiveRequestModel srmRequest = BuildSrmRequest(billObj, wmsEntries, config);
-                    string srmResponse = _apiClient.PostJson(config.SrmApiUrl, Serialize(srmRequest));
-                    this.View.ShowMessage(string.Format("WMS推送成功，SRM批量回写成功，共{0}条。SRM返回：{1}", wmsEntries.Count, srmResponse));
+                    SrmReceiveRequestModel srmRequest = BuildSrmRequest(billObj, entries, config);
+                    string srmResponse = _apiClient.PostSoap(config.SrmApiUrl, Serialize(srmRequest));
+                    this.View.ShowMessage(string.Format("WMS推送成功，WMS返回：{0}；SRM回写成功，共{1}条。SRM返回：{2}", wmsResponse, entries.Count, srmResponse));
                 }
                 catch (Exception ex)
                 {
                     this.View.ShowMessage("收料通知单联动处理异常：" + ex.Message);
                 }
             }
-        }
-
-        private Dictionary<string, string> QueryMaterialOrgValues(IntegrationConfig config, List<ReceiveEntrySource> entries)
-        {
-            List<string> materialIds = entries.Select(entry => entry.MaterialId).Where(id => !string.IsNullOrEmpty(id)).Distinct().ToList();
-            var result = new Dictionary<string, string>();
-            //if (materialIds.Count == 0)
-            if (materialIds.Count != 0)
-            {
-                return result;
-            }
-
-            string ids = string.Join(",", materialIds.Select(ToNumericId));
-            string sql = string.Format(@"
-                SELECT FMATERIALID, F_BHD_ORGID_9ZU
-                FROM T_BD_MATERIAL
-                WHERE FMATERIALID IN ({0})", ids);
-
-            DynamicObjectCollection rows = DBServiceHelper.ExecuteDynamicObject(this.Context, sql);
-            foreach (DynamicObject row in rows)
-            {
-                string materialId = row["FMATERIALID"] == null ? string.Empty : row["FMATERIALID"].ToString();
-                string orgValue = row["F_BHD_ORGID_9ZU"] == null ? string.Empty : row["F_BHD_ORGID_9ZU"].ToString();
-                if (!string.IsNullOrEmpty(materialId))
-                {
-                    result[materialId] = orgValue;
-                }
-            }
-            return result;
-        }
-
-        private string ToNumericId(string value)
-        {
-            long id;
-            if (!long.TryParse(value, out id))
-            {
-                throw new Exception("物料内码格式错误：" + value);
-            }
-            return id.ToString();
-        }
-
-        private bool IsWmsValue(string materialOrgValue, HashSet<string> configuredValues)
-        {
-            return materialOrgValue.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries)
-                .Any(value => configuredValues.Contains(value.Trim()));
         }
 
         private List<ReceiveEntrySource> GetEntrySources(DynamicObject billObj)
@@ -117,13 +70,10 @@ namespace Ben.HL.Bill.BusinessPlugIn
             int seq = 1;
             foreach (DynamicObject row in rows)
             {
-                DynamicObject material = row["MaterialID"] as DynamicObject;
-                string materialId = GetValue(material, "Id");
                 result.Add(new ReceiveEntrySource
                 {
                     Row = row,
-                    Seq = seq++,
-                    MaterialId = materialId
+                    Seq = seq++
                 });
             }
             return result;
@@ -194,23 +144,25 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             string erpDoc = GetValue(billObj, "BillNo");
             DynamicObject supplier = billObj["SupplierId"] as DynamicObject;
+            DynamicObject groupCode = billObj["StockOrgId"] as DynamicObject;
+            DynamicObject userCode = billObj["PurchaserId"] as DynamicObject;
             string receiveDoc = GetValue(billObj, "HL_SRM_Source_NO");
 
             return new SrmReceiveRequestModel
             {
-                groupCode = config.SrmGroupCode,
+                groupCode = GetValue(groupCode, "Number"),
                 ERPDoc = erpDoc,
-                userCode = config.SrmUserCode,
-                departmentCode = config.SrmDepartmentCode,
-                docDate = GetDate(billObj, "Date").Replace("-", "/").Substring(0, 10),
+                userCode = GetValue(userCode, "Number"),
+                departmentCode = "1008",
+                docDate = GetDate(billObj, "Date").Substring(0, 10),
                 supCode = GetValue(supplier, "Number"),
                 supNamess = GetValue(supplier, "Name"),
                 srtRtfList = selectedEntries.Select(entry => new SrmReceiveEntryModel
                 {
                     docSN = entry.Seq,
-                    recieveDoc = receiveDoc,
+                    recieveDoc = erpDoc,
                     recieveDocSN = entry.Seq,
-                    srmrecieveDocSN = GetValue(entry.Row, "F_PVCE_HL_SRMSFEQ"),
+                    srmrecieveDocSN = receiveDoc,
                     materialCode = GetValue(entry.Row["MaterialID"] as DynamicObject, "Number"),
                     materialName = GetValue(entry.Row["MaterialID"] as DynamicObject, "Name"),
                     materialSpec = GetValue(entry.Row["MaterialID"] as DynamicObject, "Specification"),
@@ -297,7 +249,6 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             public DynamicObject Row { get; set; }
             public int Seq { get; set; }
-            public string MaterialId { get; set; }
         }
     }
 }

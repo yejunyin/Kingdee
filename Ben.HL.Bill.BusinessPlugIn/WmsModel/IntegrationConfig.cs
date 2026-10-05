@@ -23,7 +23,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 WmsPurMtrlReturnApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/purchaseReturn/push",
                 WmsPrdInStockApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/productionInstock/push",
                 WmsPrdReportFinApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/productionReport/push",
-                SrmApiUrl = "http://your-srm-api.com/api/receive/batch",
+                SrmApiUrl = "http://192.168.1.151:9527/scm-webservice/api/order/OrderApiServiceImplService",
                 WmsOrgValues = ParseWmsOrgValues("your-wms-org-id"),
                 SrmGroupCode = "your-wms-org-id",
                 SrmUserCode = "your-wms-org-id",

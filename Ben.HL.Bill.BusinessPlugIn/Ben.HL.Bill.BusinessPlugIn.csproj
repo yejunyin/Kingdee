@@ -99,7 +99,6 @@
     <Compile Include="WmsModel\PushPrdReportFinToWMS.cs" />
     <Compile Include="WmsModel\PushPurMtrlReturnAppToWMS.cs" />
     <Compile Include="WmsModel\WmsSaveReceiveBillRequestModel.cs" />
-    <Compile Include="PPBOM\DesignatorHelper.cs" />
     <Compile Include="PPBOM\PPBomDesignatorServicePlugIn.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
