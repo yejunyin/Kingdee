@@ -125,8 +125,10 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     FBaseRealQty = GetDecimal(row, "BaseQuaQty"),
                     // 批次：汇报单的 Lot_Text（文本）/ Lot（批次主档）
                     FBatchNo = GetBatchNo(row),
+                    // 计划跟踪号：汇报单分录标识 FMtoNo
+                    FMtoNo = GetValue(row, "MtoNo"),
                     FMoBillNo = GetValue(row, "MoBillNo"),
-                    FMOSEQ = (int)GetLong(row, "MoSeq"),
+                    FMOSEQ = GetValue(row, "MoSeq"),
                     // 源单关联：SrcBillType / SrcBillNo 指向生产订单 PRD_MO
                     FSrcBillNo = GetValue(row, "SrcBillNo"),
                     FSrcFormId = GetValue(row, "SrcBillType"),

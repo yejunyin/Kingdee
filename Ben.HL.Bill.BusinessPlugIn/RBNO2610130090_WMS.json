@@ -1,0 +1,168 @@
+{
+    "FormId":  "PRD_INSTOCK",
+    "data":  {
+                 "NeedUpDateFields":  [
+
+                                      ],
+                 "NeedReturnFields":  [
+
+                                      ],
+                 "IsDeleteEntry":  "true",
+                 "SubSystemId":  "",
+                 "IsVerifyBaseDataField":  "false",
+                 "IsEntryBatchFill":  "true",
+                 "ValidateFlag":  "true",
+                 "NumberSearch":  "true",
+                 "IsAutoAdjustField":  "false",
+                 "InterationFlags":  "",
+                 "IgnoreInterationFlag":  "",
+                 "IsControlPrecision":  "false",
+                 "ValidateRepeatJson":  "false",
+                 "Model":  {
+                               "FID":  11126930,
+                               "FBillNo":  "RBNO2610130090",
+                               "FBillTypeID":  {
+                                                   "FNumber":  "SCHBD01_SYS"
+                                               },
+                               "FDate":  "2026-10-13 00:00:00",
+                               "FPrdOrgId":  {
+                                                 "FNumber":  "100"
+                                             },
+                               "FStockOrgId":  {
+                                                   "FNumber":  "102"
+                                               },
+                               "FWorkShopId":  {
+                                                   "FNumber":  "2002"
+                                               },
+                               "FOwnerTypeIdHead":  "BD_OwnerOrg",
+                               "FOwnerIdHead":  {
+                                                    "FNumber":  "102"
+                                                },
+                               "FDescription":  "",
+                               "FEntity":  [
+                                               {
+                                                   "FEntryID":  11367051,
+                                                   "FSeq":  1,
+                                                   "FMaterialId":  {
+                                                                       "FNumber":  "6000079002"
+                                                                   },
+                                                   "FUnitId":  {
+                                                                   "FNumber":  "zhi1"
+                                                               },
+                                                   "FBaseUnitId":  {
+                                                                       "FNumber":  "zhi1"
+                                                                   },
+                                                   "FRealQty":  523.0000000000,
+                                                   "FBaseRealQty":  523.0000000000,
+                                                   "FStockId":  {
+                                                                    "FNumber":  ""
+                                                                },
+                                                   "FStockLocId":  {
+                                                                       "FNumber":  ""
+                                                                   },
+                                                   "FStockStatusId":  {
+                                                                          "FNumber":  ""
+                                                                      },
+                                                   "FBatchNo":  " ",
+                                                   "FMoBillNo":  "WORK26061380952A",
+                                                   "FMOSEQ":  1,
+                                                   "FSrcBillNo":  "WORK26061380952A",
+                                                   "FSrcFormId":  "PRD_MO",
+                                                   "FAuxPropId":  {
+                                                                      "FAUXPROPID__FF100001":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100002":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100003":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100004":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100005":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100006":  {
+                                                                                                   "FNumber":  ""
+                                                                                               }
+                                                                  },
+                                                   "FEntity_Link":  [
+                                                                        {
+                                                                            "FEntity_Link_FFlowId":  "f6e6eec3-5267-4f02-8593-b633da508a72",
+                                                                            "FEntity_Link_FFlowLineId":  "3",
+                                                                            "FEntity_Link_FRuleId":  "PRD_MO2MORPT",
+                                                                            "FEntity_Link_FSTableName":  "T_PRD_MOENTRY",
+                                                                            "FEntity_Link_FSBillId":  991359,
+                                                                            "FEntity_Link_FSId":  1054445,
+                                                                            "FEntity_Link_FBaseRealQtyOld":  "0",
+                                                                            "FEntity_Link_FBaseRealQty":  "0"
+                                                                        }
+                                                                    ]
+                                               },
+                                               {
+                                                   "FEntryID":  11367052,
+                                                   "FSeq":  2,
+                                                   "FMaterialId":  {
+                                                                       "FNumber":  "6000079002"
+                                                                   },
+                                                   "FUnitId":  {
+                                                                   "FNumber":  "zhi1"
+                                                               },
+                                                   "FBaseUnitId":  {
+                                                                       "FNumber":  "zhi1"
+                                                                   },
+                                                   "FRealQty":  149.0000000000,
+                                                   "FBaseRealQty":  149.0000000000,
+                                                   "FStockId":  {
+                                                                    "FNumber":  ""
+                                                                },
+                                                   "FStockLocId":  {
+                                                                       "FNumber":  ""
+                                                                   },
+                                                   "FStockStatusId":  {
+                                                                          "FNumber":  ""
+                                                                      },
+                                                   "FBatchNo":  " ",
+                                                   "FMoBillNo":  "WORK26061379672A",
+                                                   "FMOSEQ":  1,
+                                                   "FSrcBillNo":  "WORK26061379672A",
+                                                   "FSrcFormId":  "PRD_MO",
+                                                   "FAuxPropId":  {
+                                                                      "FAUXPROPID__FF100001":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100002":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100003":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100004":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100005":  {
+                                                                                                   "FNumber":  ""
+                                                                                               },
+                                                                      "FAUXPROPID__FF100006":  {
+                                                                                                   "FNumber":  ""
+                                                                                               }
+                                                                  },
+                                                   "FEntity_Link":  [
+                                                                        {
+                                                                            "FEntity_Link_FFlowId":  "f6e6eec3-5267-4f02-8593-b633da508a72",
+                                                                            "FEntity_Link_FFlowLineId":  "3",
+                                                                            "FEntity_Link_FRuleId":  "PRD_MO2MORPT",
+                                                                            "FEntity_Link_FSTableName":  "T_PRD_MOENTRY",
+                                                                            "FEntity_Link_FSBillId":  990017,
+                                                                            "FEntity_Link_FSId":  1052945,
+                                                                            "FEntity_Link_FBaseRealQtyOld":  "0",
+                                                                            "FEntity_Link_FBaseRealQty":  "0"
+                                                                        }
+                                                                    ]
+                                               }
+                                           ]
+                           }
+             }
+}

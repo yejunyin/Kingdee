@@ -5,7 +5,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
     // API 根请求包
     public class PrdInStockSaveRequestModel
     {
-        public string FormId { get; set; } = "PRD_INSTOCK";
+        public string FormId { get; set; } = "PRD_MORPT";
         public PrdInStockSaveDataModel data { get; set; } = new PrdInStockSaveDataModel();
     }
 
@@ -57,8 +57,9 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public BaseDataModel FStockLocId { get; set; } = new BaseDataModel();
         public BaseDataModel FStockStatusId { get; set; } = new BaseDataModel();
         public string FBatchNo { get; set; }
+        public string FMtoNo { get; set; }          // 计划跟踪号（MTO）
         public string FMoBillNo { get; set; }      // 生产订单号
-        public int FMOSEQ { get; set; }            // 生产订单行号
+        public string FMOSEQ { get; set; }            // 生产订单行号
         public string FSrcBillNo { get; set; }
         public string FSrcFormId { get; set; } = "PRD_PrdOrder";
         public Dictionary<string, BaseDataModel> FAuxPropId { get; set; } = new Dictionary<string, BaseDataModel>();

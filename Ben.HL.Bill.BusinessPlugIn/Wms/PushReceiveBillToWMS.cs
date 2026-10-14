@@ -170,7 +170,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     unitCode = GetValue(entry.Row["UnitId"] as DynamicObject, "Number"),
                     batchNo = GetValue(entry.Row, "Lot_Text"),
                     num = GetDecimal(entry.Row, "ActReceiveQty"),
-                    warehouseCode = GetValue(entry.Row["STOCKID"] as DynamicObject, "Number"),
+                    warehouseCode =  GetValue(entry.Row["STOCKID"] as DynamicObject, "Number"),
                     locationCode = GetValue(entry.Row, "LocationId")
                 }).ToList()
             };
