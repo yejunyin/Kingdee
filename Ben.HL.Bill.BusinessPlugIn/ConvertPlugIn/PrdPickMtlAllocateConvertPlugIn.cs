@@ -30,6 +30,10 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
     ///
     /// 同一张目标单内若有多行相同物料，库存按行依次核销（前一行已占用的库存不会重复分给后一行）。
     ///
+    /// 跨源行合并：不同源投料行若分到【同一物料+同一仓库+同一批号】，只落一条目标领料分录（数量合计），
+    /// 源单关联子单据体保留各源行的关联行、按各自分配量分别核销；仅当源行的工序/成本对象等业务维度一致时才应合并。
+    /// 同一源行因高优仓不足而拆到多个仓库/批号时，仍按库存记录拆成多条分录（一行只能一个仓库+批号）。
+    ///
     /// ⚠️ 注意：代码中的字段/实体标识为通用命名，部署前必须对照你环境 BOS 实际元数据确认（见文件顶部常量）。
     /// </summary>
     [HotUpdate]
@@ -67,6 +71,7 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
         private const string FLD_ACTUAL = "ActualQty";                      // 实领数量（断点 [23]）
         private const string FLD_STOCK_PLAN = "StockAppQty";                // 库存单位申请数量（断点 [24]，随拆行按比例折算）
         private const string FLD_STOCK_ACTUAL = "StockActualQty";           // 库存单位实领数量（断点 [25]）
+        private const string FLD_BASE_STOCK_ACTUAL = "BaseStockActualQty";  // 主库存基本单位实发数量（元数据 FBaseStockActualQty，非持久列；保存校验要求单位一致时与 BaseActualQty 相等）
         private const string FLD_SEC_ACTUAL = "SecActualQty";               // 辅助单位实领数量（断点 [26]）
         private const string FLD_ENTRY_ID = "Id";                           // 明细分录主键（断点 [0]）
         private const string STOCK_FORMID = "BD_Stock";
@@ -148,6 +153,7 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
 
                 // 先算出每一行的分配结果，再统一批量加载基础资料、统一写回
                 var plans = new List<RowPlan>();
+                var plannedRows = new HashSet<DynamicObject>();   // 成功分配的源行（其余为无库存保留行）
                 var allStockIds = new HashSet<long>();
                 var allLotIds = new HashSet<long>();
 
@@ -172,12 +178,14 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
                     plans.Add(new RowPlan
                     {
                         SrcRow = srcRow,
+                        MaterialId = materialId,
                         NeedQty = need,
                         // 必须在改写前快照：多单位数量 + 源单关联数量，否则首行收缩后拆行会重复乘比例
                         QtySnaps = SnapshotQtyFields(srcRow),
                         LinkSnaps = SnapshotLinks(srcRow),
                         Allocations = allocs
                     });
+                    plannedRows.Add(srcRow);
                 }
 
                 if (plans.Count == 0) return;
@@ -186,10 +194,147 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
                 var stockMap = LoadBaseDataMap(_stockMeta, allStockIds);
                 var lotMap = LoadBaseDataMap(_batchMeta, allLotIds);
 
+                // 跨源行落行：同 物料+仓库+批号 的分配合并为一条目标分录，源单关联按各源行分配量分别核销
+                ApplyMergedPlans(plans, srcRows, plannedRows, entry, entryEntity, stockMap, lotMap);
+            }
+
+            /// <summary>
+            /// 跨源行合并落行：把所有源行的分配原子按 (物料, 仓库, 批号) 分组，
+            /// 同组只落一条目标分录（组内数量合计），源单关联按各源行分配量分别收缩/复制，保证数量守恒；
+            /// 组间仍按 仓库拣货优先级 -> 批号优先级 -> 批号创建日期 排序；
+            /// 每个源行至多复用其自身原行一次，其余源行删除；无库存的源行原样保留。
+            /// </summary>
+            private void ApplyMergedPlans(List<RowPlan> plans, List<DynamicObject> srcRows,
+                HashSet<DynamicObject> plannedRows, DynamicObjectCollection entry, Entity entryEntity,
+                Dictionary<long, DynamicObject> stockMap, Dictionary<long, DynamicObject> lotMap)
+            {
+                // 1) 展开为“分配原子”：一个源行在某条库存记录上取得的数量
+                var atoms = new List<AllocAtom>();
                 foreach (var plan in plans)
                 {
-                    ApplyPlan(plan, entry, entryEntity, stockMap, lotMap);
+                    foreach (var a in plan.Allocations)
+                    {
+                        atoms.Add(new AllocAtom { Plan = plan, Allocation = a });
+                    }
                 }
+
+                // 2) 按 物料+仓库+批号 分组合并（批号 null 归一为同组），组间沿用仓库/批号优先级排序
+                var groups = atoms
+                    .GroupBy(x => Tuple.Create(x.Plan.MaterialId, x.Allocation.StockId, x.Allocation.LotId))
+                    .Select(g =>
+                    {
+                        var first = g.First().Allocation;
+                        return new MergedGroup
+                        {
+                            MaterialId = g.Key.Item1,
+                            StockId = g.Key.Item2,
+                            LotId = g.Key.Item3,
+                            Atoms = g.ToList(),
+                            PickPriority = first.Source != null ? first.Source.PickPriority : 9999,
+                            BatchPriority = first.Source != null ? first.Source.BatchPriority : 9999,
+                            BatchCreateDate = first.Source != null ? first.Source.BatchCreateDate : null
+                        };
+                    })
+                    .OrderBy(g => g.PickPriority)                        // 仓库优先级：主
+                    .ThenBy(g => g.BatchPriority)                        // 批号优先级：次
+                    .ThenBy(g => g.BatchCreateDate ?? DateTime.MaxValue) // FIFO 兜底
+                    .ThenBy(g => g.StockId)
+                    .ThenBy(g => g.LotId ?? long.MaxValue)
+                    .ToList();
+
+                // 3) 每组落一行；每个源行至多被复用一次（首次作为模板时复用原行，之后新建）
+                var usedSrc = new HashSet<DynamicObject>();
+                foreach (var grp in groups)
+                {
+                    var template = grp.Atoms[0].Plan.SrcRow;
+                    bool reuse = usedSrc.Add(template);
+                    DynamicObject row = reuse
+                        ? template
+                        : CreateCopyRow(template, entry, entryEntity);
+
+                    decimal totalQty = 0m;
+                    var scaledTotals = new Dictionary<string, decimal>();
+                    bool firstAtom = true;
+                    foreach (var atom in grp.Atoms)
+                    {
+                        var plan = atom.Plan;
+                        decimal atomScale = plan.NeedQty > 0 ? atom.Allocation.Qty / plan.NeedQty : 0m;
+
+                        // 仅“复用原行 + 该源行的首个原子”就地收缩原关联；其余源行的关联一律复制追加（Id=0）
+                        bool inPlace = firstAtom && reuse && ReferenceEquals(row, plan.SrcRow);
+                        ApplyLink(row, plan.LinkSnaps, atomScale, !inPlace);
+
+                        // 非基本单位数量：各源行按各自比例折算后求和（与不合并时拆分行合计完全一致）
+                        foreach (var fld in SCALED_QTY_FIELDS)
+                        {
+                            decimal snap;
+                            if (plan.QtySnaps.TryGetValue(fld, out snap))
+                            {
+                                decimal prev;
+                                scaledTotals.TryGetValue(fld, out prev);
+                                scaledTotals[fld] = prev + Math.Round(snap * atomScale, 6);
+                            }
+                        }
+
+                        totalQty += atom.Allocation.Qty;
+                        firstAtom = false;
+                    }
+
+                    // 4) 仓库/批号/数量写入合并行
+                    DynamicObject stockObj;
+                    if (stockMap.TryGetValue(grp.StockId, out stockObj))
+                        row[FLD_STOCK] = stockObj;
+
+                    string lotText = "";
+                    if (grp.LotId.HasValue)
+                    {
+                        DynamicObject lotObj;
+                        if (lotMap.TryGetValue(grp.LotId.Value, out lotObj))
+                        {
+                            row[FLD_LOT] = lotObj;
+                            // Lot_Text 必须与批号主档编号(FNumber)一致：保存校验会比对 FLot 显示值，
+                            // 只赋批号对象而把 Lot_Text 置空时，界面虽能显示批号，保存仍报“启用了批号，批号为空”
+                            lotText = lotObj["Number"] == null ? "" : lotObj["Number"].ToString();
+                        }
+                    }
+                    else
+                    {
+                        row[FLD_LOT] = null;
+                    }
+                    // 批号文本是冗余展示字段，换批号必须同步写批号编号（无批号才清空），否则界面显示正常但保存校验失败
+                    if (row.DynamicObjectType.Properties.Contains(FLD_LOT_TEXT))
+                        row[FLD_LOT_TEXT] = lotText;
+
+                    // 基本单位数量：组内各源行分配量合计（申请=实领）
+                    row[FLD_BASE_PLAN] = totalQty;
+                    row[FLD_BASE_ACTUAL] = totalQty;
+                    // 主库存基本单位实发数量（虚拟字段）：单位一致校验 FBaseActualQty = FBaseStockActualQty，
+                    // 转换平台不会在插件改量后自动重算，必须同步写入，否则保存报 962417
+                    if (row.DynamicObjectType.Properties.Contains(FLD_BASE_STOCK_ACTUAL))
+                        row[FLD_BASE_STOCK_ACTUAL] = totalQty;
+
+                    foreach (var kv in scaledTotals)
+                    {
+                        if (row.DynamicObjectType.Properties.Contains(kv.Key))
+                            row[kv.Key] = kv.Value;
+                    }
+                }
+
+                // 5) 删除“已分配但未被任何合并组复用”的源行（已被合并进其他行）；
+                //    无库存的源行不在 plannedRows 中，原样保留转手工处理
+                foreach (var srcRow in srcRows)
+                {
+                    if (plannedRows.Contains(srcRow) && !usedSrc.Contains(srcRow))
+                        entry.Remove(srcRow);
+                }
+            }
+
+            private DynamicObject CreateCopyRow(DynamicObject srcRow, DynamicObjectCollection entry, Entity entryEntity)
+            {
+                var row = new DynamicObject(entryEntity.DynamicObjectType);
+                CopyRow(srcRow, row, entryEntity);
+                entry.Add(row);
+                return row;
             }
 
             /// <summary>
@@ -205,60 +350,6 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
                     _inventoryCache[key] = stocks;
                 }
                 return stocks;
-            }
-
-            private void ApplyPlan(RowPlan plan, DynamicObjectCollection entry, Entity entryEntity,
-                Dictionary<long, DynamicObject> stockMap, Dictionary<long, DynamicObject> lotMap)
-            {
-                bool first = true;
-                foreach (var a in plan.Allocations)
-                {
-                    decimal scale = plan.NeedQty > 0 ? a.Qty / plan.NeedQty : 0m;
-                    DynamicObject row;
-                    if (first)
-                    {
-                        row = plan.SrcRow;        // 第一行复用原行
-                        first = false;
-                    }
-                    else
-                    {
-                        row = new DynamicObject(entryEntity.DynamicObjectType);
-                        CopyRow(plan.SrcRow, row, entryEntity);
-                        entry.Add(row);           // 不足部分新增一行
-                    }
-
-                    // 源单关联：按本次分配比例拆分，保证源投料单已下推/未下推数量按实际分配量核销
-                    ApplyLink(row, plan.LinkSnaps, scale, !first);
-
-                    DynamicObject stockObj;
-                    if (stockMap.TryGetValue(a.StockId, out stockObj))
-                        row[FLD_STOCK] = stockObj;
-
-                    if (a.LotId.HasValue)
-                    {
-                        DynamicObject lotObj;
-                        if (lotMap.TryGetValue(a.LotId.Value, out lotObj))
-                            row[FLD_LOT] = lotObj;
-                    }
-                    else
-                    {
-                        row[FLD_LOT] = null;
-                    }
-                    // 批号文本是冗余展示字段，换批号必须同步清空，否则界面仍显示旧批号
-                    if (row.DynamicObjectType.Properties.Contains(FLD_LOT_TEXT))
-                        row[FLD_LOT_TEXT] = "";
-
-                    // 基本单位数量：按分配结果精确写入（申请=实领），不用乘比例，避免各行舍入后合计偏差
-                    row[FLD_BASE_PLAN] = a.Qty;
-                    row[FLD_BASE_ACTUAL] = a.Qty;
-
-                    // 普通单位/库存单位/辅助单位数量：按快照值 × 比例 折算（各单位间比例一致，无需单位换算）
-                    ApplyScaledQty(row, plan.QtySnaps, scale, FLD_PLAN);
-                    ApplyScaledQty(row, plan.QtySnaps, scale, FLD_ACTUAL);
-                    ApplyScaledQty(row, plan.QtySnaps, scale, FLD_STOCK_PLAN);
-                    ApplyScaledQty(row, plan.QtySnaps, scale, FLD_STOCK_ACTUAL);
-                    ApplyScaledQty(row, plan.QtySnaps, scale, FLD_SEC_ACTUAL);
-                }
             }
 
             /// <summary>
@@ -361,7 +452,7 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
                     if (remain <= 0) break;
                     decimal take = Math.Min(remain, s.RemainQty);
                     if (take <= 0) continue;
-                    result.Add(new Allocation { StockId = s.StockId, LotId = s.LotId, Qty = take });
+                    result.Add(new Allocation { StockId = s.StockId, LotId = s.LotId, Qty = take, Source = s });
                     s.RemainQty -= take;
                     remain -= take;
                 }
@@ -386,14 +477,6 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
                         snap[fld] = ToDecimal(row[fld]);
                 }
                 return snap;
-            }
-
-            private static void ApplyScaledQty(DynamicObject row, Dictionary<string, decimal> snaps, decimal scale, string field)
-            {
-                decimal original;
-                if (!snaps.TryGetValue(field, out original)) return;
-                if (!row.DynamicObjectType.Properties.Contains(field)) return;
-                row[field] = Math.Round(original * scale, 6);
             }
 
             // ----------------------- 源单关联拆分 -----------------------
@@ -517,6 +600,7 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
                         p.Name == FLD_BASE_PLAN || p.Name == FLD_BASE_ACTUAL ||
                         p.Name == FLD_PLAN || p.Name == FLD_ACTUAL ||
                         p.Name == FLD_STOCK_PLAN || p.Name == FLD_STOCK_ACTUAL ||
+                        p.Name == FLD_BASE_STOCK_ACTUAL ||
                         p.Name == FLD_SEC_ACTUAL ||
                         p.Name == PICK_LINK_ENTRY || p.Name == SERIAL_ENTRY) continue;
                     dst[p.Name] = src[p.Name];
@@ -596,6 +680,7 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
             public long StockId;
             public long? LotId;
             public decimal Qty;
+            public StockLot Source;                 // 来源库存记录（带仓库/批号排序优先级）
         }
 
         private class LinkSnap
@@ -608,10 +693,30 @@ namespace Ben.HL.Bill.BusinessPlugIn.ConvertPlugIn
         private class RowPlan
         {
             public DynamicObject SrcRow;
+            public long MaterialId;
             public decimal NeedQty;
             public Dictionary<string, decimal> QtySnaps;
             public List<LinkSnap> LinkSnaps;
             public List<Allocation> Allocations;
+        }
+
+        /// <summary>分配原子：某条源行计划在某条库存记录（仓库+批号）上取得的数量。</summary>
+        private class AllocAtom
+        {
+            public RowPlan Plan;
+            public Allocation Allocation;
+        }
+
+        /// <summary>跨源行合并组：同 物料+仓库+批号 的原子合并落同一条目标分录。</summary>
+        private class MergedGroup
+        {
+            public long MaterialId;
+            public long StockId;
+            public long? LotId;
+            public List<AllocAtom> Atoms;
+            public int PickPriority;
+            public int BatchPriority;
+            public DateTime? BatchCreateDate;
         }
     }
 }

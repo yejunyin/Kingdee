@@ -31,6 +31,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
     public class ReceiveBillHeaderModel
     {
         public long FID { get; set; }
+        public string FBillNo { get; set; }
         public string F_HL_SRM_Source_NO { get; set; }
         public BaseDataModel FBillTypeID { get; set; } = new BaseDataModel();
         public string FBusinessType { get; set; }

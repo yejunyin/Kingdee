@@ -126,6 +126,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     // 批次：汇报单的 Lot_Text（文本）/ Lot（批次主档）
                     FBatchNo = GetBatchNo(row),
                     FMoBillNo = GetValue(row, "MoBillNo"),
+                    FMOSEQ = (int)GetLong(row, "MoSeq"),
                     // 源单关联：SrcBillType / SrcBillNo 指向生产订单 PRD_MO
                     FSrcBillNo = GetValue(row, "SrcBillNo"),
                     FSrcFormId = GetValue(row, "SrcBillType"),

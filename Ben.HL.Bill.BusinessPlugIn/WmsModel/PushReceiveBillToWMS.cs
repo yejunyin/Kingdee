@@ -22,7 +22,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("Save", StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {
@@ -85,6 +85,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             ReceiveBillHeaderModel header = request.data.Model;
 
             header.FID = GetLong(billObj, "Id");
+            header.FBillNo = GetValue(billObj, "BillNo");
             header.F_HL_SRM_Source_NO = GetValue(billObj, "HL_SRM_Source_NO");
             header.FBusinessType = GetValue(billObj, "BusinessType");
             header.FDate = GetDate(billObj, "Date");

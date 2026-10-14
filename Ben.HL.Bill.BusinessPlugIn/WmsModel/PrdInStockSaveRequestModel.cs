@@ -58,6 +58,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public BaseDataModel FStockStatusId { get; set; } = new BaseDataModel();
         public string FBatchNo { get; set; }
         public string FMoBillNo { get; set; }      // 生产订单号
+        public int FMOSEQ { get; set; }            // 生产订单行号
         public string FSrcBillNo { get; set; }
         public string FSrcFormId { get; set; } = "PRD_PrdOrder";
         public Dictionary<string, BaseDataModel> FAuxPropId { get; set; } = new Dictionary<string, BaseDataModel>();
