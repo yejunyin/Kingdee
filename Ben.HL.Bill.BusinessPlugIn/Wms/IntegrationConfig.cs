@@ -10,10 +10,6 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public string WmsPrdInStockApiUrl { get; private set; }
         public string WmsPrdReportFinApiUrl { get; private set; }
         public string SrmApiUrl { get; private set; }
-        public string[] WmsOrgValues { get; private set; }
-        public string SrmGroupCode { get; private set; }
-        public string SrmUserCode { get; private set; }
-        public string SrmDepartmentCode { get; private set; }
 
         public static IntegrationConfig Load()
         {
@@ -22,12 +18,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 WmsReceiveBillApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/purchaseReceipt/push",
                 WmsPurMtrlReturnApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/purchaseReturn/push",
                 WmsPrdInStockApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/productionInstock/push",
-                WmsPrdReportFinApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/productionReport/push",
-                SrmApiUrl = "http://192.168.1.151:9527/scm-webservice/api/order/OrderApiServiceImplService",
-                WmsOrgValues = ParseWmsOrgValues("your-wms-org-id"),
-                SrmGroupCode = "your-wms-org-id",
-                SrmUserCode = "your-wms-org-id",
-                SrmDepartmentCode = "your-wms-org-id"
+                WmsPrdReportFinApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/semiProductReportIn/push",
+                SrmApiUrl = "http://192.168.1.151:9527/scm-webservice/api/order/OrderApiServiceImplService"
             };
         }
 

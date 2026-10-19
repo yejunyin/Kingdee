@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using Kingdee.BOS;
+using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Core.Bill.PlugIn;
 using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
+using log4net;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.ServiceHelper;
 using Kingdee.BOS.Util;
@@ -16,28 +18,38 @@ namespace Ben.HL.Bill.BusinessPlugIn
     [Description("收料通知单审核推送WMS-Ben")]
     public class PushReceiveBillToWMS : AbstractBillPlugIn
     {
+        private static readonly ILog _benLog = LogManager.GetLogger("Ben.WMS");
         private readonly WmsApiClient _apiClient = new WmsApiClient();
 
         public override void AfterDoOperation(AfterDoOperationEventArgs e)
         {
-            base.AfterDoOperation(e);
+            base.AfterDoOperation(e); 
 
-            if (e.Operation.Operation.Equals("Save", StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
             {
+                DynamicObject billObj = this.Model.DataObject;
+                if (billObj == null)
+                {
+                    this.View.ShowMessage("没有找到需要推送的单据数据");
+                    return;
+                }
+
+                // 仅当分录中存在物料的拣货仓库(PickStockId.FNumber)为2010时，才推送WMS/SRM
+                if (!ExistsPickStock2010(billObj))
+                {
+                    return;
+                }
+
                 try
                 {
-                    DynamicObject billObj = this.Model.DataObject;
-                    if (billObj == null)
-                    {
-                        this.View.ShowMessage("没有找到需要推送的单据数据");
-                        return;
-                    }
                     IntegrationConfig config = IntegrationConfig.Load();
                     List<ReceiveEntrySource> entries = GetEntrySources(billObj);
 
                     WmsSaveReceiveBillRequestModel wmsRequest = BuildStandardApiRequest(billObj, entries);
                     string wmsJson = Serialize(wmsRequest);
                     string wmsResponse = _apiClient.PostJson(config.WmsReceiveBillApiUrl, wmsJson);
+                    // 输出推送报文及返回至 Ben.WMS 专属日志文件
+                    _benLog.Info("收料通知单推送WMS请求报文：" + wmsJson + "；WMS返回：" + wmsResponse);
 
                     // HL_SRM_Source_NO不为空时才推送SRM
                     string srmSourceNo = GetValue(billObj, "HL_SRM_Source_NO");
@@ -48,7 +60,10 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     }
 
                     SrmReceiveRequestModel srmRequest = BuildSrmRequest(billObj, entries, config);
-                    string srmResponse = _apiClient.PostSoap(config.SrmApiUrl, Serialize(srmRequest));
+                    string srmJson = Serialize(srmRequest);
+                    string srmResponse = _apiClient.PostSoap(config.SrmApiUrl, srmJson);
+                    // 输出回写报文及返回至 Ben.WMS 专属日志文件
+                    _benLog.Info("收料通知单SRM回写请求报文：" + srmJson + "；SRM返回：" + srmResponse);
                     this.View.ShowMessage(string.Format("WMS推送成功，WMS返回：{0}；SRM回写成功，共{1}条。SRM返回：{2}", wmsResponse, entries.Count, srmResponse));
                 }
                 catch (Exception ex)
@@ -77,6 +92,54 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 });
             }
             return result;
+        }
+
+        /// <summary>
+        /// 判断分录中是否存在物料拣货仓库(T_BD_MATERIALPRODUCE.FPICKSTOCKID对应编号)为2010的行。
+        /// PickStockId未映射到收料通知单分录物料对象，直接查询物料基础资料表。
+        /// </summary>
+        private bool ExistsPickStock2010(DynamicObject billObj)
+        {
+            DynamicObjectCollection rows = billObj["PUR_ReceiveEntry"] as DynamicObjectCollection;
+            if (rows == null || rows.Count == 0)
+            {
+                return false;
+            }
+
+            var materialIds = new List<long>();
+            foreach (DynamicObject row in rows)
+            {
+                DynamicObject material = row["MaterialID"] as DynamicObject;
+                long materialId = GetLong(material, "Id");
+                if (materialId > 0 && !materialIds.Contains(materialId))
+                {
+                    materialIds.Add(materialId);
+                }
+            }
+            if (materialIds.Count == 0)
+            {
+                return false;
+            }
+
+            // 收料组织（库存组织）
+            DynamicObject stockOrg = billObj["StockOrgId"] as DynamicObject;
+            long stockOrgId = GetLong(stockOrg, "Id");
+            if (stockOrgId <= 0)
+            {
+                return false;
+            }
+
+            // 物料生产页签表 FPICKSTOCKID -> T_BD_STOCK.FSTOCKID，按收料组织 FUSEORGID 限定
+            string sql = string.Format(@"
+                                    SELECT TOP 1 1
+                                    FROM T_BD_MATERIALPRODUCE p
+                                    INNER JOIN T_BD_STOCK s ON s.FSTOCKID = p.FPICKSTOCKID
+                                    WHERE p.FMATERIALID IN ({0})
+                                    AND p.FUSEORGID = {1}
+                                    AND s.FNUMBER = '2010'", string.Join(",", materialIds), stockOrgId);
+
+            DynamicObjectCollection result = DBUtils.ExecuteDynamicObject(this.Context, sql);
+            return result != null && result.Count > 0;
         }
 
         private WmsSaveReceiveBillRequestModel BuildStandardApiRequest(DynamicObject billObj, List<ReceiveEntrySource> selectedEntries)
@@ -136,7 +199,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             SetBaseDataNumber(row, "UnitId", entry.FUnitId);
             SetBaseDataNumber(row, "PriceUnitId", entry.FPriceUnitId);
             SetBaseDataNumber(row, "StockUnitID", entry.FStockUnitID);
-            SetBaseDataNumber(row, "STOCKID", entry.FSTOCKID);
+            entry.FSTOCKID.FNumber = "2010";
             entry.FDetailEntity_Link = GetLinkData(row);
             return entry;
         }
@@ -171,7 +234,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     batchNo = GetValue(entry.Row, "Lot_Text"),
                     num = GetDecimal(entry.Row, "ActReceiveQty"),
                     warehouseCode =  GetValue(entry.Row["STOCKID"] as DynamicObject, "Number"),
-                    locationCode = GetValue(entry.Row, "LocationId")
+                    locationCode = GetValue(entry.Row["STOCKID"] as DynamicObject, "Number")+".01",
                 }).ToList()
             };
         }

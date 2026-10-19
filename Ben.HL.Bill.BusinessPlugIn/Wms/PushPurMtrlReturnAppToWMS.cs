@@ -20,7 +20,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation.Operation.Equals("Save", StringComparison.OrdinalIgnoreCase))
+            if (e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="14.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
   <PropertyGroup>
@@ -12,6 +12,8 @@
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <TargetFrameworkProfile />
+    <!-- 金蝶 K3Cloud Bin 目录，换机器只改这一行 -->
+    <KingdeeBin>D:\Kingdee\K3Cloud\WebSite\Bin</KingdeeBin>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -34,41 +36,45 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="Kingdee.BOS">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.BOS.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.BOS.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.BOS.App">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.BOS.App.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.BOS.App.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.BOS.App.Core">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.BOS.App.Core.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.BOS.App.Core.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.BOS.Core">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.BOS.Core.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.BOS.Core.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.BOS.DataEntity">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.BOS.DataEntity.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.BOS.DataEntity.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.BOS.ServiceHelper">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.BOS.ServiceHelper.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.BOS.ServiceHelper.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.K3.MFG.ENG.App.Core">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.K3.MFG.ENG.App.Core.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.K3.MFG.ENG.App.Core.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.K3.MFG.ENG.App.ServicePlugIn">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.K3.MFG.ENG.App.ServicePlugIn.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.K3.MFG.ENG.App.ServicePlugIn.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.K3.MFG.ENG.Common.BusinessEntity">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.K3.MFG.ENG.Common.BusinessEntity.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.K3.MFG.ENG.Common.BusinessEntity.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.K3.MFG.ENG.Common.Core">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.K3.MFG.ENG.Common.Core.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.K3.MFG.ENG.Common.Core.dll</HintPath>
     </Reference>
     <Reference Include="Kingdee.K3.MFG.ServiceHelper">
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Kingdee.K3.MFG.ServiceHelper.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Kingdee.K3.MFG.ServiceHelper.dll</HintPath>
     </Reference>
     <Reference Include="Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
-      <HintPath>D:\Kingdee\K3Cloud\WebSite\Bin\Newtonsoft.Json.dll</HintPath>
+      <HintPath>$(KingdeeBin)\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="log4net2, Version=2.0.15.0, Culture=neutral, PublicKeyToken=669e0ddf0bb4d213">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>$(KingdeeBin)\log4net2.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Configuration" />
@@ -98,7 +104,6 @@
     <Compile Include="Wms\Model\PrdReturnMtrlSaveRequestModel.cs" />
     <Compile Include="Wms\Model\PurMtrlReturnAppSaveRequestModel.cs" />
     <Compile Include="Wms\Model\SrmReceiveRequestModel.cs" />
-    <Compile Include="Wms\PushPrdInStockToWMS.cs" />
     <Compile Include="Wms\PushPrdReportFinToWMS.cs" />
     <Compile Include="Wms\PushPurMtrlReturnAppToWMS.cs" />
     <Compile Include="Wms\Model\WmsSaveReceiveBillRequestModel.cs" />

@@ -9,6 +9,29 @@ namespace Ben.HL.Bill.BusinessPlugIn
     /// </summary>
     public class WmsApiClient
     {
+        static WmsApiClient()
+        {
+            // 部分网关对 Expect:100-continue 处理异常（工具不带此头能通、HttpClient 返回404/417），全局关闭
+            System.Net.ServicePointManager.Expect100Continue = false;
+        }
+
+        /// <summary>
+        /// 创建直连内网的 HttpClient：
+        /// 必须 UseProxy=false——金蝶服务器上若配了系统/IE代理，
+        /// HttpClient 默认走代理，内网WMS地址会被代理返回404（Postman等工具不走代理所以正常）
+        /// </summary>
+        private static HttpClient CreateHttpClient(int timeoutSeconds)
+        {
+            var handler = new HttpClientHandler
+            {
+                UseProxy = false,
+                Proxy = null
+            };
+            var client = new HttpClient(handler);
+            client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+            return client;
+        }
+
         /// <summary>
         /// 调用WMS接口（POST JSON）
         /// </summary>
@@ -25,9 +48,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             try
             {
-                using (var client = new HttpClient())
+                using (var client = CreateHttpClient(timeoutSeconds))
                 {
-                    client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
                     client.DefaultRequestHeaders.Add("Accept", "application/json");
 
                     var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
@@ -48,7 +70,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
             catch (Exception ex)
             {
-                throw new Exception($"调用接口异常: {ex.Message}", ex);
+                throw new Exception($"调用接口异常 [{apiUrl}]: {ex.Message}", ex);
             }
         }
 

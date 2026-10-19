@@ -7,6 +7,7 @@ using Kingdee.BOS.Core.DynamicForm.PlugIn.Args;
 using Kingdee.BOS.Orm.DataEntity;
 using Newtonsoft.Json;
 using Kingdee.BOS.Util;
+using log4net;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
@@ -19,13 +20,14 @@ namespace Ben.HL.Bill.BusinessPlugIn
     [Description("生产汇报单审核推送WMS-Ben")]
     public class PushPrdReportFinToWMS : AbstractBillPlugIn
     {
+        private static readonly ILog _benLog = LogManager.GetLogger("Ben.WMS");
         private readonly WmsApiClient _apiClient = new WmsApiClient();
 
         public override void AfterDoOperation(AfterDoOperationEventArgs e)
         {
             base.AfterDoOperation(e);
 
-            if (!e.Operation.Operation.Equals("Save", StringComparison.OrdinalIgnoreCase))
+            if (!e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
@@ -44,6 +46,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 // WMS 可直接用此结构调用金蝶 PRD_InStock.Save 创建生产入库单
                 PrdInStockSaveRequestModel wmsRequest = BuildPrdInStockDataFromReport(billObj);
                 string jsonData = Serialize(wmsRequest);
+                // 输出推送报文到 Ben.WMS 专属日志文件，便于排查
+                _benLog.Info("生产汇报单推送WMS请求报文：" + jsonData);
 
                 string response = _apiClient.PostJson(config.WmsPrdReportFinApiUrl, jsonData);
                 this.View.ShowMessage("生产汇报单推送WMS成功。WMS返回：" + response);
