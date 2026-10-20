@@ -91,10 +91,8 @@
     <Compile Include="Wms\IntegrationConfig.cs" />
     <Compile Include="StorageBillAuditPlugin.cs" />
     <Compile Include="Wms\PushPrdReturnMtrlToWMS.cs" />
+    <Compile Include="Wms\PushReceiveBillListToWMS.cs" />
     <Compile Include="Wms\PushReceiveBillToWMS.cs" />
-    <Compile Include="Wms\PushReceiveBillToWmsTest.cs" />
-    <Compile Include="Wms\PushReceiveBillTestRunner.cs" />
-    <Compile Include="Wms\PushPrdReportFinTestRunner.cs" />
     <Compile Include="SalContractBillPlugIn.cs" />
     <Compile Include="SaleOrderEdit.cs" />
     <Compile Include="SimulateQuotationEdit.cs" />
@@ -106,6 +104,7 @@
     <Compile Include="Wms\Model\SrmReceiveRequestModel.cs" />
     <Compile Include="Wms\PushPrdReportFinToWMS.cs" />
     <Compile Include="Wms\PushPurMtrlReturnAppToWMS.cs" />
+    <Compile Include="Wms\Service\ReceiveBillPushService.cs" />
     <Compile Include="Wms\Model\WmsSaveReceiveBillRequestModel.cs" />
     <Compile Include="PPBOM\PPBomDesignatorServicePlugIn.cs" />
     <Compile Include="ConvertPlugIn\PrdPickMtlAllocateConvertPlugIn.cs" />

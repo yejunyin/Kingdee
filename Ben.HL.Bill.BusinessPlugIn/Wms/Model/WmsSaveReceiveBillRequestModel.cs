@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
@@ -77,6 +77,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public Dictionary<string, BaseDataModel> FAuxPropId { get; set; } = new Dictionary<string, BaseDataModel>();
         public string FMtoNo { get; set; }
         public BaseDataModel FSTOCKID { get; set; } = new BaseDataModel();
+        public string FLot { get; set; }
         public string FDescription { get; set; }
         public List<DetailEntityLinkModel> FDetailEntity_Link { get; set; } = new List<DetailEntityLinkModel>();
     }
