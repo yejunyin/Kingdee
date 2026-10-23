@@ -81,8 +81,12 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 return;
             }
 
-            // 3. 逐张推送 WMS
+            // 3. 逐张推送 WMS，收集结果
             IntegrationConfig config = IntegrationConfig.Load();
+            List<string> pushResults = new List<string>();
+            int okCount = 0;
+            int failCount = 0;
+
             foreach (DynamicObject billObj in fullBills)
             {
                 string billNo = PrdReportFinPushService.GetValue(billObj, "BillNo");
@@ -94,12 +98,25 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
                     string response = _apiClient.PostJson(config.WmsPrdReportFinApiUrl, jsonData);
                     _benLog.Info(string.Format("生产汇报单(操作服务)推送WMS返回 BillNo={0}：{1}", billNo, response));
+
+                    pushResults.Add(string.Format("✓ {0} 推送WMS成功", billNo));
+                    okCount++;
                 }
                 catch (Exception ex)
                 {
                     _benLog.Error(string.Format("生产汇报单(操作服务)推送WMS异常 BillNo={0}", billNo), ex);
+                    pushResults.Add(string.Format("✗ {0} 推送WMS失败：{1}", billNo, ex.Message));
+                    failCount++;
                 }
             }
+
+            // 4. 汇总弹窗
+            OpServiceResultHelper.ShowOperationResult(
+                this.OperationResult,
+                this.Context,
+                "生产汇报单推送WMS结果",
+                string.Format("成功 {0} 张，失败 {1} 张，共 {2} 张", okCount, failCount, okCount + failCount),
+                pushResults);
         }
     }
 }

@@ -98,6 +98,7 @@
     <Compile Include="SaleOrderEdit.cs" />
     <Compile Include="SimulateQuotationEdit.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Wms\Common\OpServiceResultHelper.cs" />
     <Compile Include="Wms\Common\WmsApiClient.cs" />
     <Compile Include="Wms\PrdReportFin\PrdInStockSaveRequestModel.cs" />
     <Compile Include="Wms\PrdReturnMtrl\PrdReturnMtrlSaveRequestModel.cs" />

@@ -30,7 +30,13 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             base.AfterDoOperation(e);
 
-            if (e.Operation == null || !e.Operation.Operation.Equals("Audit", StringComparison.OrdinalIgnoreCase))
+            if (e.Operation == null)
+            {
+                return;
+            }
+            string opName = e.Operation.Operation;
+            if (!opName.Equals("Audit", StringComparison.OrdinalIgnoreCase)
+                && !opName.Equals("PushWMS", StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }

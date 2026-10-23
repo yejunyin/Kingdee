@@ -80,6 +80,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             int srmOkCount = 0;
             int skipCount = 0;
             int statusSavedCount = 0;
+            List<string> pushResults = new List<string>();
 
             foreach (DynamicObject billObj in fullBills)
             {
@@ -102,6 +103,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                             _benLog.Error(string.Format("收料通知单(操作服务)回写Fwmsstatus(非WMS仓)失败 BillNo={0}", billNo), ex);
                         }
                         skipCount++;
+                        pushResults.Add(string.Format("○ {0} 非WMS仓物料，跳过推送", billNo));
                         continue;
                     }
 
@@ -109,6 +111,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
                     // === WMS 推送 ===
                     string wmsMsg;
+                    bool wmsOk = false;
                     try
                     {
                         WmsSaveReceiveBillRequestModel wmsRequest = svc.BuildStandardApiRequest(billObj, entries);
@@ -117,6 +120,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                         _benLog.Info(string.Format("收料通知单(操作服务)推送WMS BillNo={0} 请求：{1}；返回：{2}", billNo, wmsJson, wmsResponse));
                         wmsMsg = ReceiveBillPushService.ParseWmsResponse(wmsResponse);
                         wmsOkCount++;
+                        wmsOk = true;
                     }
                     catch (Exception ex)
                     {
@@ -127,6 +131,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     // === SRM 推送 ===
                     string srmMsg = null;
                     bool srmSkipped = false;
+                    bool srmOk = false;
                     string srmSourceNo = ReceiveBillPushService.GetValue(billObj, "HL_SRM_Source_NO");
                     if (string.IsNullOrWhiteSpace(srmSourceNo))
                     {
@@ -142,6 +147,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
                             _benLog.Info(string.Format("收料通知单(操作服务)SRM回写 BillNo={0} 请求：{1}；返回：{2}", billNo, srmJson, srmResponse));
                             srmMsg = ReceiveBillPushService.ParseSrmResponse(srmResponse);
                             srmOkCount++;
+                            srmOk = true;
                         }
                         catch (Exception ex)
                         {
@@ -161,16 +167,31 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     {
                         _benLog.Error(string.Format("收料通知单(操作服务)回写Fwmsstatus失败 BillNo={0}", billNo), saveEx);
                     }
+
+                    // === 组装该单据的汇总消息 ===
+                    string wmsTag = wmsOk ? "WMS✓" : "WMS✗";
+                    string srmTag = srmSkipped ? "SRM○(无源单号)" : (srmOk ? "SRM✓" : "SRM✗");
+                    pushResults.Add(string.Format("{0} {1} {2} {3}", wmsOk && (srmOk || srmSkipped) ? "✓" : "✗", billNo, wmsTag, srmTag));
                 }
                 catch (Exception ex)
                 {
                     _benLog.Error(string.Format("收料通知单(操作服务)推送异常 BillNo={0}", billNo), ex);
+                    pushResults.Add(string.Format("✗ {0} 处理异常：{1}", billNo, ex.Message));
                 }
             }
 
             _benLog.Info(string.Format(
                 "收料通知单(操作服务)审核推送完成：WMS成功{0}，SRM成功{1}，跳过(非WMS仓){2}，状态回写{3}",
                 wmsOkCount, srmOkCount, skipCount, statusSavedCount));
+
+            OpServiceResultHelper.ShowOperationResult(
+                this.OperationResult,
+                this.Context,
+                "收料通知单推送结果",
+                string.Format(
+                    "WMS成功 {0}，SRM成功 {1}，跳过(非WMS仓) {2}，状态回写 {3}，共 {4} 张",
+                    wmsOkCount, srmOkCount, skipCount, statusSavedCount, pushResults.Count),
+                pushResults);
         }
     }
 }
