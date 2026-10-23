@@ -88,24 +88,28 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="buttonclass.cs" />
-    <Compile Include="Wms\IntegrationConfig.cs" />
+    <Compile Include="Wms\Common\IntegrationConfig.cs" />
     <Compile Include="StorageBillAuditPlugin.cs" />
-    <Compile Include="Wms\PushPrdReturnMtrlToWMS.cs" />
-    <Compile Include="Wms\PushReceiveBillListToWMS.cs" />
-    <Compile Include="Wms\PushReceiveBillToWMS.cs" />
+    <Compile Include="Wms\PrdReturnMtrl\PushPrdReturnMtrlToWMS.cs" />
+    <Compile Include="Wms\ReceiveBill\PushReceiveBillToWMS.cs" />
+    <Compile Include="Wms\ReceiveBill\ReceiveBillAuditOpServicePlugIn.cs" />
+    <Compile Include="Wms\ReceiveBill\PushReceiveBillListToWMS.cs" />
     <Compile Include="SalContractBillPlugIn.cs" />
     <Compile Include="SaleOrderEdit.cs" />
     <Compile Include="SimulateQuotationEdit.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="Wms\WmsApiClient.cs" />
-    <Compile Include="Wms\Model\PrdInStockSaveRequestModel.cs" />
-    <Compile Include="Wms\Model\PrdReturnMtrlSaveRequestModel.cs" />
-    <Compile Include="Wms\Model\PurMtrlReturnAppSaveRequestModel.cs" />
-    <Compile Include="Wms\Model\SrmReceiveRequestModel.cs" />
-    <Compile Include="Wms\PushPrdReportFinToWMS.cs" />
-    <Compile Include="Wms\PushPurMtrlReturnAppToWMS.cs" />
-    <Compile Include="Wms\Service\ReceiveBillPushService.cs" />
-    <Compile Include="Wms\Model\WmsSaveReceiveBillRequestModel.cs" />
+    <Compile Include="Wms\Common\WmsApiClient.cs" />
+    <Compile Include="Wms\PrdReportFin\PrdInStockSaveRequestModel.cs" />
+    <Compile Include="Wms\PrdReturnMtrl\PrdReturnMtrlSaveRequestModel.cs" />
+    <Compile Include="Wms\PurMtrlReturnApp\PurMtrlReturnAppSaveRequestModel.cs" />
+    <Compile Include="Wms\ReceiveBill\SrmReceiveRequestModel.cs" />
+    <Compile Include="Wms\PrdReportFin\PushPrdReportFinToWMS.cs" />
+    <Compile Include="Wms\PrdReportFin\PushPrdReportFinListToWMS.cs" />
+    <Compile Include="Wms\PrdReportFin\PrdReportFinAuditOpServicePlugIn.cs" />
+    <Compile Include="Wms\PurMtrlReturnApp\PushPurMtrlReturnAppToWMS.cs" />
+    <Compile Include="Wms\PrdReportFin\PrdReportFinPushService.cs" />
+    <Compile Include="Wms\ReceiveBill\ReceiveBillPushService.cs" />
+    <Compile Include="Wms\ReceiveBill\WmsSaveReceiveBillRequestModel.cs" />
     <Compile Include="PPBOM\PPBomDesignatorServicePlugIn.cs" />
     <Compile Include="ConvertPlugIn\PrdPickMtlAllocateConvertPlugIn.cs" />
   </ItemGroup>

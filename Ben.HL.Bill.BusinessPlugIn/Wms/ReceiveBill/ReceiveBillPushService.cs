@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Kingdee.BOS;
 using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.Util;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
@@ -259,6 +261,109 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public static string Serialize(object value)
         {
             return JsonConvert.SerializeObject(value, new JsonSerializerSettings { NullValueHandling = NullValueHandling.Ignore });
+        }
+
+        #endregion
+
+        #region 响应解析 & Fwmsstatus 组装
+
+        /// <summary>
+        /// 解析 WMS JSON 返回，提取 msg 字段
+        /// 示例结构：{"code":200,"msg":"ERP采购收货申请已接收...","data":{...}}
+        /// </summary>
+        public static string ParseWmsResponse(string wmsResponse)
+        {
+            if (string.IsNullOrWhiteSpace(wmsResponse))
+            {
+                return "WMS返回为空";
+            }
+            try
+            {
+                JObject json = JObject.Parse(wmsResponse);
+                JToken msgToken = json["msg"];
+                if (msgToken != null && msgToken.Type != JTokenType.Null)
+                {
+                    return msgToken.ToString();
+                }
+            }
+            catch
+            {
+                // 不是合法 JSON 就直接返回原文
+            }
+            return wmsResponse;
+        }
+
+        /// <summary>
+        /// 解析 SRM SOAP 返回，提取 <return> 节点内部 JSON。
+        /// 规则：status=200 返回"成功"；其他状态优先取 message 字段，否则拼"失败(status=xxx)"
+        /// 示例结构：<soap:Envelope>...<return>{"message":"...","status":"500"}</return>...</soap:Envelope>
+        ///           或 <return>{"status":"200"}</return>
+        /// </summary>
+        public static string ParseSrmResponse(string srmResponse)
+        {
+            if (string.IsNullOrWhiteSpace(srmResponse))
+            {
+                return "SRM返回为空";
+            }
+
+            string innerJson = null;
+            // 正则抓取 <return>...</return> 中间的内容（忽略命名空间前缀）
+            var match = Regex.Match(srmResponse, @"<[^>]*return[^>]*>(.*?)</[^>]*return[^>]*>",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            if (match.Success && match.Groups.Count > 1)
+            {
+                innerJson = match.Groups[1].Value.Trim();
+            }
+
+            if (!string.IsNullOrWhiteSpace(innerJson))
+            {
+                try
+                {
+                    JObject json = JObject.Parse(innerJson);
+                    string status = json["status"] != null ? json["status"].ToString() : string.Empty;
+                    if (string.Equals(status, "200", StringComparison.Ordinal))
+                    {
+                        return "成功";
+                    }
+                    // 非 200，优先 message，没有就拼 status
+                    JToken msgToken = json["message"];
+                    if (msgToken != null && msgToken.Type != JTokenType.Null && !string.IsNullOrWhiteSpace(msgToken.ToString()))
+                    {
+                        return msgToken.ToString();
+                    }
+                    return string.Format("失败(status={0})", status);
+                }
+                catch
+                {
+                    // JSON 解析失败，直接返回 <return> 内容
+                    return innerJson;
+                }
+            }
+            return srmResponse;
+        }
+
+        /// <summary>
+        /// 组装单据头 Fwmsstatus 字段值，格式：WMS: xxx \n SRM: xxx（或 SRM无需同步）
+        /// </summary>
+        public static string BuildFwmsstatusValue(string wmsMsg, string srmMsg, bool srmSkipped)
+        {
+            string srmPart = srmSkipped ? "SRM无需同步" : srmMsg;
+            return string.Format("WMS: {0}\r\nSRM: {1}", wmsMsg ?? string.Empty, srmPart ?? string.Empty);
+        }
+
+        /// <summary>
+        /// 直接拼 SQL 更新收料通知单表头自定义字段 FWMSSTATUS。
+        /// 单据插件/列表插件场景均可调用，绕过 DynamicObject 只读校验。
+        /// </summary>
+        public static int SaveFwmsstatus(Context ctx, long billId, string value)
+        {
+            if (ctx == null || billId <= 0) return 0;
+            // T_PUR_RECEIVE 是收料通知单物理表头表；FWMSSTATUS 是自定义字段物理列名（全大写）
+            string sql = string.Format(
+                "UPDATE T_PUR_RECEIVE SET FWMSSTATUS = N'{0}' WHERE FID = {1}",
+                (value ?? string.Empty).Replace("'", "''"),
+                billId);
+            return DBUtils.Execute(ctx, sql);
         }
 
         #endregion
