@@ -111,6 +111,9 @@
     <Compile Include="Wms\PrdReportFin\PrdReportFinPushService.cs" />
     <Compile Include="Wms\ReceiveBill\ReceiveBillPushService.cs" />
     <Compile Include="Wms\ReceiveBill\WmsSaveReceiveBillRequestModel.cs" />
+    <Compile Include="Wms\OutStockApply\MisDeliverySaveRequestModel.cs" />
+    <Compile Include="Wms\OutStockApply\OutStockApplyAuditOpServicePlugIn.cs" />
+    <Compile Include="Wms\OutStockApply\OutStockApplyPushService.cs" />
     <Compile Include="PPBOM\PPBomDesignatorServicePlugIn.cs" />
     <Compile Include="ConvertPlugIn\PrdPickMtlAllocateConvertPlugIn.cs" />
   </ItemGroup>

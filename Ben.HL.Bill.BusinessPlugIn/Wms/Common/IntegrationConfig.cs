@@ -9,6 +9,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
         public string WmsPurMtrlReturnApiUrl { get; private set; }
         public string WmsPrdInStockApiUrl { get; private set; }
         public string WmsPrdReportFinApiUrl { get; private set; }
+        public string WmsOutStockApplyApiUrl { get; private set; }
         public string SrmApiUrl { get; private set; }
 
         public static IntegrationConfig Load()
@@ -19,6 +20,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 WmsPurMtrlReturnApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/purchaseReturn/push",
                 WmsPrdInStockApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/productionInstock/push",
                 WmsPrdReportFinApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/semiProductReportIn/push",
+                // TODO: 出库申请单推送地址为占位规律地址，拿到WMS真实地址后改这一行
+                WmsOutStockApplyApiUrl = "http://192.168.15.20:8081/prod-api/api/upperSystem/outstockApply/push",
                 SrmApiUrl = "http://192.168.1.151:9527/scm-webservice/api/order/OrderApiServiceImplService"
             };
         }
