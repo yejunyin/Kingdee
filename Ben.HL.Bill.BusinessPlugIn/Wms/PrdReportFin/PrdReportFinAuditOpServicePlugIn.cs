@@ -86,12 +86,22 @@ namespace Ben.HL.Bill.BusinessPlugIn
             List<string> pushResults = new List<string>();
             int okCount = 0;
             int failCount = 0;
+            int skipCount = 0;
 
             foreach (DynamicObject billObj in fullBills)
             {
                 string billNo = PrdReportFinPushService.GetValue(billObj, "BillNo");
                 try
                 {
+                    // 仅当分录中存在物料的拣货仓库(FNumber)为2010时，才推送WMS
+                    if (!PrdReportFinPushService.ExistsPickStock2010(billObj, this.Context))
+                    {
+                        skipCount++;
+                        pushResults.Add(string.Format("- {0} 跳过(无2010仓库)", billNo));
+                        _benLog.Info(string.Format("生产汇报单(操作服务)跳过推送 BillNo={0}：未检测到2010拣货仓库物料", billNo));
+                        continue;
+                    }
+
                     PrdInStockSaveRequestModel wmsRequest = PrdReportFinPushService.BuildPrdInStockDataFromReport(billObj);
                     string jsonData = PrdReportFinPushService.Serialize(wmsRequest);
                     _benLog.Info(string.Format("生产汇报单(操作服务)推送WMS请求报文 BillNo={0}：{1}", billNo, jsonData));
@@ -115,7 +125,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 this.OperationResult,
                 this.Context,
                 "生产汇报单推送WMS结果",
-                string.Format("成功 {0} 张，失败 {1} 张，共 {2} 张", okCount, failCount, okCount + failCount),
+                string.Format("成功 {0} 张，失败 {1} 张，跳过 {2} 张(无2010仓库)，共 {3} 张",
+                    okCount, failCount, skipCount, okCount + failCount + skipCount),
                 pushResults);
         }
     }

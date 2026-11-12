@@ -94,6 +94,16 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 try
                 {
                     var svc = new OutStockApplyPushService(this.Context);
+
+                    // 仅当分录中存在物料的拣货仓库(FNumber)为2010时，才推送WMS
+                    if (!svc.ExistsPickStock2010(billObj))
+                    {
+                        skipCount++;
+                        pushResults.Add(string.Format("- {0} 跳过(无2010仓库)", billNo));
+                        _benLog.Info(string.Format("出库申请单(操作服务)跳过推送 BillNo={0}：未检测到2010拣货仓库物料", billNo));
+                        continue;
+                    }
+
                     MisDeliverySaveRequestModel wmsRequest = svc.BuildMisDeliveryRequest(billObj);
 
                     // 无有效物料分录：跳过推送

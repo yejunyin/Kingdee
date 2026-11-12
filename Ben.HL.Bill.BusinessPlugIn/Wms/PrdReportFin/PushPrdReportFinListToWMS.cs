@@ -96,6 +96,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
 
             int okCount = 0;
+            int skippedCount = 0;
             var errors = new List<string>();
             IntegrationConfig config = IntegrationConfig.Load();
 
@@ -104,6 +105,15 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 try
                 {
                     if (billObj == null) continue;
+
+                    // 仅当分录中存在物料的拣货仓库(FNumber)为2010时，才推送WMS
+                    if (!PrdReportFinPushService.ExistsPickStock2010(billObj, this.Context))
+                    {
+                        skippedCount++;
+                        string billNo = PrdReportFinPushService.GetValue(billObj, "BillNo");
+                        _benLog.Info(string.Format("生产汇报单(列表)跳过推送 BillNo={0}：未检测到2010拣货仓库物料", billNo));
+                        continue;
+                    }
 
                     PrdInStockSaveRequestModel wmsRequest = PrdReportFinPushService.BuildPrdInStockDataFromReport(billObj);
                     string jsonData = PrdReportFinPushService.Serialize(wmsRequest);
@@ -122,6 +132,10 @@ namespace Ben.HL.Bill.BusinessPlugIn
             }
 
             string msg = string.Format("列表批量审核推送完成：WMS成功{0}张", okCount);
+            if (skippedCount > 0)
+            {
+                msg += string.Format("，跳过(无2010仓库){0}张", skippedCount);
+            }
             if (errors.Count > 0)
             {
                 msg += string.Format("，失败{0}张：{1}", errors.Count, string.Join("; ", errors.Take(5)));

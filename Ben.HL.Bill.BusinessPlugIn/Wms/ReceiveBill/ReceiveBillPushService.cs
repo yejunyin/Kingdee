@@ -127,8 +127,75 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 header.FinanceEntity.FPricePoint = GetValue(financeRows[0], "PricePoint");
             }
 
+            LoadPurchaseOrderTaxRates(selectedEntries);
             header.FDetailEntity = selectedEntries.Select(BuildEntry).ToList();
             return request;
+        }
+
+        /// <summary>
+        /// 从收料通知单分录的源单关联(FDetailEntity_Link)中提取采购订单分录内码(FSId)，
+        /// 批量查询 t_PUR_POOrderEntry 的 FEntryTaxRate 并回填到 ReceiveEntrySource.PurchaseOrderTaxRate。
+        /// 仅当收料通知单分录自身没有税率时才需要从源单取值。
+        /// </summary>
+        private void LoadPurchaseOrderTaxRates(List<ReceiveEntrySource> entries)
+        {
+            if (entries == null || entries.Count == 0) return;
+
+            // 1) 收集所有关联的采购订单分录内码 (FSId)
+            var poEntryIds = new List<long>();
+            foreach (var entry in entries)
+            {
+                DynamicObjectCollection links = entry.Row != null
+                    ? entry.Row["FDetailEntity_Link"] as DynamicObjectCollection
+                    : null;
+                if (links == null) continue;
+                foreach (DynamicObject link in links)
+                {
+                    long sId = GetLong(link, "SId");
+                    if (sId > 0 && !poEntryIds.Contains(sId))
+                    {
+                        poEntryIds.Add(sId);
+                    }
+                }
+            }
+            if (poEntryIds.Count == 0) return;
+
+            // 2) 批量查询采购订单分录税率（物理表 T_PUR_POORDERENTRY_F，税率字段 FTAXRATE）
+            string sql = string.Format(
+                "SELECT FEntryID, FTAXRATE FROM T_PUR_POORDERENTRY_F WHERE FEntryID IN ({0})",
+                string.Join(",", poEntryIds));
+
+            DynamicObjectCollection result = DBUtils.ExecuteDynamicObject(_ctx, sql);
+            if (result == null || result.Count == 0) return;
+
+            var taxRateMap = new Dictionary<long, decimal>();
+            foreach (DynamicObject r in result)
+            {
+                long id = GetLong(r, "FEntryID");
+                decimal rate = GetDecimal(r, "FTAXRATE");
+                if (id > 0 && !taxRateMap.ContainsKey(id))
+                {
+                    taxRateMap[id] = rate;
+                }
+            }
+
+            // 3) 回填到每个 entry：取第一条能匹配上的采购订单分录税率
+            foreach (var entry in entries)
+            {
+                DynamicObjectCollection links = entry.Row != null
+                    ? entry.Row["FDetailEntity_Link"] as DynamicObjectCollection
+                    : null;
+                if (links == null) continue;
+                foreach (DynamicObject link in links)
+                {
+                    long sId = GetLong(link, "SId");
+                    if (sId > 0 && taxRateMap.ContainsKey(sId))
+                    {
+                        entry.PurchaseOrderTaxRate = taxRateMap[sId];
+                        break;
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -147,7 +214,11 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 FActReceiveQty = GetDecimal(row, "ActReceiveQty"),
                 FPriceUnitQty = GetDecimal(row, "PriceUnitQty"),
                 FTAXPRICE = GetDecimal(row, "TAXPRICE"),
-                FEntryTaxRate = GetDecimal(row, "EntryTaxRate"),
+                // 收料通知单分录自身无税率字段，优先取源单(采购订单分录)查到的税率，
+                // 若未查到(无关联或关联的PO无税率)则回退尝试分录自身字段，最后兜底为 0
+                FEntryTaxRate = source.PurchaseOrderTaxRate != 0
+                    ? source.PurchaseOrderTaxRate
+                    : GetDecimal(row, "EntryTaxRate"),
                 FSrcBillNo = GetValue(row, "SrcBillNo"),
                 FMtoNo = GetValue(row, "MtoNo"),
                 FDescription = GetValue(row, "Description")
@@ -372,6 +443,11 @@ namespace Ben.HL.Bill.BusinessPlugIn
         {
             public DynamicObject Row { get; set; }
             public int Seq { get; set; }
+            /// <summary>
+            /// 从源单（采购订单分录）查询得到的税率。默认 0 表示未查到，
+            /// 此时 BuildEntry 会回退尝试收料通知单分录自身的 EntryTaxRate 字段。
+            /// </summary>
+            public decimal PurchaseOrderTaxRate { get; set; }
         }
     }
 }

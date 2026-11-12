@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using Kingdee.BOS;
+using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.Util;
 using Newtonsoft.Json;
@@ -29,6 +31,55 @@ namespace Ben.HL.Bill.BusinessPlugIn
             {
                 NullValueHandling = NullValueHandling.Ignore
             });
+        }
+
+        /// <summary>
+        /// 判断生产汇报单分录中是否存在物料拣货仓库(T_BD_MATERIALPRODUCE.FPICKSTOCKID
+        /// 对应 T_BD_STOCK.FNUMBER)为 2010 的行。
+        /// 生产汇报单表头无库存组织字段，库存组织从分录 StockInOrgId 取第一条。
+        /// </summary>
+        public static bool ExistsPickStock2010(DynamicObject reportObj, Context ctx)
+        {
+            if (reportObj == null || ctx == null) return false;
+
+            DynamicObjectCollection rows = reportObj["PRD_MORPTENTRY"] as DynamicObjectCollection;
+            if (rows == null || rows.Count == 0) return false;
+
+            // 1) 收集所有分录的物料ID（去重）
+            var materialIds = new List<long>();
+            long stockOrgId = 0;
+            foreach (DynamicObject row in rows)
+            {
+                if (row == null) continue;
+
+                DynamicObject material = row["MaterialId"] as DynamicObject;
+                long mid = GetLong(material, "Id");
+                if (mid > 0 && !materialIds.Contains(mid))
+                {
+                    materialIds.Add(mid);
+                }
+
+                // 从第一条有值的分录取库存组织
+                if (stockOrgId <= 0)
+                {
+                    DynamicObject stockOrg = row["StockInOrgId"] as DynamicObject;
+                    stockOrgId = GetLong(stockOrg, "Id");
+                }
+            }
+
+            if (materialIds.Count == 0 || stockOrgId <= 0) return false;
+
+            // 2) 复用收料通知单同款 SQL：物料生产页签表 FPICKSTOCKID -> T_BD_STOCK.FSTOCKID
+            string sql = string.Format(@"
+                                    SELECT TOP 1 1
+                                    FROM T_BD_MATERIALPRODUCE p
+                                    INNER JOIN T_BD_STOCK s ON s.FSTOCKID = p.FPICKSTOCKID
+                                    WHERE p.FMATERIALID IN ({0})
+                                    AND p.FUSEORGID = {1}
+                                    AND s.FNUMBER = '2010'", string.Join(",", materialIds), stockOrgId);
+
+            DynamicObjectCollection result = DBUtils.ExecuteDynamicObject(ctx, sql);
+            return result != null && result.Count > 0;
         }
 
         #region 构建方法
