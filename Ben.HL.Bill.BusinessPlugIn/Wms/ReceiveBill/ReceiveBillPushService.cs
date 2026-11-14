@@ -221,7 +221,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     : GetDecimal(row, "EntryTaxRate"),
                 FSrcBillNo = GetValue(row, "SrcBillNo"),
                 FMtoNo = GetValue(row, "MtoNo"),
-                FDescription = GetValue(row, "Description")
+                FDescription = GetValue(row, "Description"),
+                FAuxPropId = BuildAuxPropData(row)
             };
             SetBaseDataNumber(row, "MaterialID", entry.FMaterialId);
             SetBaseDataNumber(row, "UnitId", entry.FUnitId);
@@ -296,6 +297,41 @@ namespace Ben.HL.Bill.BusinessPlugIn
         #endregion
 
         #region 通用辅助方法
+
+        /// <summary>
+        /// 构建分录辅助资料字典，输出结构：{ "FAUXPROPID__FF100001": { "FNumber": "xxx" }, ... }
+        /// 取值路径：row → AuxPropId → F100001~F100006 → Number
+        /// </summary>
+        private static Dictionary<string, BaseDataModel> BuildAuxPropData(DynamicObject row)
+        {
+            // Key = WMS API 期望的字典键；Value = 金蝶 DynamicObject 里 AuxPropId 子实体的真实字段名
+            var fieldMap = new List<KeyValuePair<string, string>>
+            {
+                new KeyValuePair<string, string>("FAUXPROPID__FF100001", "F100001"),
+                new KeyValuePair<string, string>("FAUXPROPID__FF100002", "F100002"),
+                new KeyValuePair<string, string>("FAUXPROPID__FF100003", "F100003"),
+                new KeyValuePair<string, string>("FAUXPROPID__FF100004", "F100004"),
+                new KeyValuePair<string, string>("FAUXPROPID__FF100005", "F100005"),
+                new KeyValuePair<string, string>("FAUXPROPID__FF100006", "F100006"),
+            };
+
+            var auxPropDict = new Dictionary<string, BaseDataModel>();
+            DynamicObject auxPropObj = row != null ? row["AuxPropId"] as DynamicObject : null;
+            foreach (var kv in fieldMap)
+            {
+                var baseData = new BaseDataModel();
+                if (auxPropObj != null && auxPropObj.Contains(kv.Value) && auxPropObj[kv.Value] != null)
+                {
+                    DynamicObject ffPropObj = auxPropObj[kv.Value] as DynamicObject;
+                    if (ffPropObj != null)
+                    {
+                        baseData.FNumber = GetValue(ffPropObj, "FNumber");
+                    }
+                }
+                auxPropDict[kv.Key] = baseData;
+            }
+            return auxPropDict;
+        }
 
         /// <summary>
         /// 安全提取 DynamicObject 基础资料中的 FNumber 辅助方法

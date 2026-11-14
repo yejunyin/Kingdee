@@ -69,12 +69,16 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
             if (materialIds.Count == 0 || stockOrgId <= 0) return false;
 
-            // 2) 复用收料通知单同款 SQL：物料生产页签表 FPICKSTOCKID -> T_BD_STOCK.FSTOCKID
+            // 2) 生产汇报单 MaterialId 是物料主表 FMASTERID，联 T_BD_MATERIAL（物料组织行）
+            //    和 T_BD_MATERIALPRODUCE（生产页签）一起筛，避免只取到某个组织的数据
             string sql = string.Format(@"
                                     SELECT TOP 1 1
-                                    FROM T_BD_MATERIALPRODUCE p
+                                    FROM T_BD_MATERIAL m
+                                    LEFT JOIN T_BD_MATERIALPRODUCE p
+                                        ON p.FMATERIALID = m.FMATERIALID
+                                        AND p.FUSEORGID = m.FUSEORGID
                                     INNER JOIN T_BD_STOCK s ON s.FSTOCKID = p.FPICKSTOCKID
-                                    WHERE p.FMATERIALID IN ({0})
+                                    WHERE m.FMASTERID IN ({0})
                                     AND p.FUSEORGID = {1}
                                     AND s.FNUMBER = '2010'", string.Join(",", materialIds), stockOrgId);
 

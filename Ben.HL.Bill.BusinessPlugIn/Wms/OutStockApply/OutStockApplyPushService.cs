@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Linq;
 using Kingdee.BOS;
-using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Orm.DataEntity;
 using Kingdee.BOS.Util;
 
@@ -30,7 +29,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             var result = new List<DynamicObject>();
             if (billObj == null) return result;
 
-            DynamicObjectCollection rows = billObj["FEntity"] as DynamicObjectCollection;
+            DynamicObjectCollection rows = billObj["BillEntry"] as DynamicObjectCollection;
             if (rows == null) return result;
 
             foreach (DynamicObject row in rows)
@@ -41,51 +40,25 @@ namespace Ben.HL.Bill.BusinessPlugIn
         }
 
         /// <summary>
-        /// 判断出库申请单分录中是否存在物料拣货仓库(T_BD_MATERIALPRODUCE.FPICKSTOCKID
-        /// 对应 T_BD_STOCK.FNUMBER)为 2010 的行。
-        /// 出库申请单表头 StockOrgId 是申请组织，实际库存组织从分录 StockOrgIdEntry 取第一条。
+        /// 判断出库申请单分录中是否存在仓库为 2010 的行。
+        /// 直接检查分录 StockId 基础资料的 Number 是否等于 "2010"，无需查库。
         /// </summary>
         public bool ExistsPickStock2010(DynamicObject billObj)
         {
             if (billObj == null) return false;
 
             List<DynamicObject> rows = GetEntryRows(billObj);
-            if (rows.Count == 0) return false;
-
-            // 1) 收集所有分录的物料ID（去重）+ 取首行的库存组织内码
-            var materialIds = new List<long>();
-            long stockOrgId = 0;
             foreach (DynamicObject row in rows)
             {
                 if (row == null) continue;
-
-                DynamicObject material = row["MaterialId"] as DynamicObject;
-                long mid = ReceiveBillPushService.GetLong(material, "Id");
-                if (mid > 0 && !materialIds.Contains(mid))
+                DynamicObject stock = row["StockId"] as DynamicObject;
+                string stockNumber = ReceiveBillPushService.GetValue(stock, "Number");
+                if (string.Equals(stockNumber, "2010", StringComparison.Ordinal))
                 {
-                    materialIds.Add(mid);
-                }
-
-                if (stockOrgId <= 0)
-                {
-                    DynamicObject stockOrg = row["StockOrgIdEntry"] as DynamicObject;
-                    stockOrgId = ReceiveBillPushService.GetLong(stockOrg, "Id");
+                    return true;
                 }
             }
-
-            if (materialIds.Count == 0 || stockOrgId <= 0) return false;
-
-            // 2) 复用收料通知单同款 SQL
-            string sql = string.Format(@"
-                                    SELECT TOP 1 1
-                                    FROM T_BD_MATERIALPRODUCE p
-                                    INNER JOIN T_BD_STOCK s ON s.FSTOCKID = p.FPICKSTOCKID
-                                    WHERE p.FMATERIALID IN ({0})
-                                    AND p.FUSEORGID = {1}
-                                    AND s.FNUMBER = '2010'", string.Join(",", materialIds), stockOrgId);
-
-            DynamicObjectCollection result = DBUtils.ExecuteDynamicObject(_ctx, sql);
-            return result != null && result.Count > 0;
+            return false;
         }
 
         /// <summary>
@@ -117,9 +90,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
             string deptNumber = GetBaseNumber(billObj, "ApplyDeptId", "DeptId");
             header.FDeptId.FNumber = deptNumber;
 
-            // 自定义基础资料 F_hll_Base：优先取单据同名字段，缺省用部门编码
-            string hllBaseNumber = GetBaseNumber(billObj, "F_hll_Base");
-            header.F_hll_Base.FNumber = string.IsNullOrWhiteSpace(hllBaseNumber) ? deptNumber : hllBaseNumber;
+            // 自定义基础资料 FBizType：优先取单据同名字段，缺省用部门编码
+            header.F_hll_Base.FNumber = "003"; ;
 
             header.FEntity = rows
                 .Select(row => BuildEntry(row, billNo, applyOrgNumber))
