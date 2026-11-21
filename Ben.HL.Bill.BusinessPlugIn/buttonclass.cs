@@ -301,6 +301,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
             {
                 case "tbBtnToRelease":
                 case "tbBtnToStart":
+                    CheckAndMarkFirstOrder();
                     ExecuteToRelease();
                     break;
                 case "tbBtnUndoToPlanConfirm":
@@ -441,6 +442,96 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 _needBlockOperation = true;
                 _errorMessage = "执行MES校验失败：" + ex.Message;
                 this.View.ShowMessage(_errorMessage, MessageBoxType.Error);
+            }
+        }
+
+        /// <summary>
+        /// 检查并标记首单：如果当前生产订单的物料在历史生产订单中未出现过，则在生产用料清单备注中标记"首单"
+        /// 标记表：T_PRD_PPBOM_L，标记字段：FDescription
+        /// </summary>
+        private void CheckAndMarkFirstOrder()
+        {
+            try
+            {
+                DynamicObject dataPacket = this.Model.DataObject;
+                long currentMoId = Convert.ToInt64(dataPacket["Id"]);
+                if (currentMoId <= 0) return;
+
+                // 获取生产订单分录（TreeEntity）
+                DynamicObjectCollection entrys = dataPacket["TreeEntity"] as DynamicObjectCollection;
+                if (entrys == null || entrys.Count == 0) return;
+
+                // 收集当前订单所有物料ID
+                HashSet<long> materialIds = new HashSet<long>();
+                foreach (DynamicObject entry in entrys)
+                {
+                    long materialId = GetValueLong(entry, "MaterialID_Id", "MaterialID");
+                    if (materialId > 0)
+                    {
+                        materialIds.Add(materialId);
+                    }
+                }
+
+                if (materialIds.Count == 0) return;
+
+                // 检查每个物料是否在其他生产订单中出现过
+                bool isFirstOrder = false;
+                foreach (long materialId in materialIds)
+                {
+                    // 查询该物料是否存在于其他非作废、未禁用的生产订单中
+                    string querySql = $@"
+                        SELECT COUNT(1) 
+                        FROM T_PRD_MOENTRY E
+                        INNER JOIN T_PRD_MO M ON E.FID = M.FID
+                        WHERE E.FMATERIALID = {materialId} 
+                          AND M.FID <> {currentMoId}
+                          AND M.FDOCUMENTSTATUS <> 'D'";
+
+                    int count = DBUtils.ExecuteScalar<int>(this.Context, querySql, 0, null);
+                    if (count == 0)
+                    {
+                        isFirstOrder = true;
+                        break;
+                    }
+                }
+
+                if (isFirstOrder)
+                {
+                    // 先查 T_PRD_PPBOM_L 是否有记录，没有则先 INSERT
+                    string parentFidSql = $"SELECT FID FROM T_PRD_PPBOM WHERE FMOID = {currentMoId}";
+                    long parentFid = DBUtils.ExecuteScalar<long>(this.Context, parentFidSql, 0, null);
+
+                    if (parentFid > 0)
+                    {
+                        string checkSql = $"SELECT COUNT(1) FROM T_PRD_PPBOM_L WHERE FID = {parentFid}";
+                        int exists = DBUtils.ExecuteScalar<int>(this.Context, checkSql, 0, null);
+
+                        if (exists == 0)
+                        {
+                            // 插入一条空记录（FID 关联主表，FPKID 取最大值+1，FLOCALEID 默认 0）
+                            string fpkidSql = "SELECT ISNULL(MAX(FPKID), 0) + 1 FROM T_PRD_PPBOM_L";
+                            long newFpkId = DBUtils.ExecuteScalar<long>(this.Context, fpkidSql, 0, null);
+                            string insertSql = $"INSERT INTO T_PRD_PPBOM_L(FPKID, FID, FLOCALEID) VALUES({newFpkId}, {parentFid}, 2052)";
+                            DBUtils.Execute(this.Context, insertSql);
+                        }
+
+                        // 更新备注
+                        string updateSql = $@"
+                            UPDATE T_PRD_PPBOM_L 
+                            SET FDescription = CASE 
+                                WHEN FDescription IS NULL OR FDescription = '' THEN '首单'
+                                WHEN FDescription LIKE '%首单%' THEN FDescription
+                                ELSE CONCAT(FDescription, ' 首单')
+                            END
+                            WHERE FID = {parentFid}";
+                        DBUtils.Execute(this.Context, updateSql);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // 首单标记失败不阻断主要流程，仅提示
+                this.View.ShowMessage($"首单标记失败：{ex.Message}");
             }
         }
 
