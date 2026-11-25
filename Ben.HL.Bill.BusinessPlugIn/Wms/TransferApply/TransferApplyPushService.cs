@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Kingdee.BOS;
+using Kingdee.BOS.App.Data;
 using Kingdee.BOS.Orm.DataEntity;
 
 namespace Ben.HL.Bill.BusinessPlugIn
@@ -31,7 +32,7 @@ namespace Ben.HL.Bill.BusinessPlugIn
 
             // 调拨申请单单据体Key: STK_TransferApply 通常为 BillEntry
             // 如与实际元数据不符，改这里即可
-            DynamicObjectCollection rows = billObj["BillEntry"] as DynamicObjectCollection;
+            DynamicObjectCollection rows = billObj["STK_STKTRANSFERAPPENTRY"] as DynamicObjectCollection;
             if (rows == null) return result;
 
             foreach (DynamicObject row in rows)
@@ -70,6 +71,23 @@ namespace Ben.HL.Bill.BusinessPlugIn
         }
 
         /// <summary>
+        /// 调拨申请单(STK_TransferApply)单据类型 → 直接调拨单(STK_TransferDirect)单据类型 映射。
+        /// 金蝶两张单据的单据类型体系完全独立，编码不可直接复用，必须按此表转换。
+        /// 未知类型回退到标准直接调拨单 ZJDB01_SYS。
+        /// </summary>
+        private static string MapToTransferDirectBillType(string applyBillType)
+        {
+            if (string.IsNullOrWhiteSpace(applyBillType)) return "ZJDB01_SYS";
+            switch (applyBillType)
+            {
+                case "DBSD01_SYS": return "ZJDB01_SYS"; // 标准调拨申请单 → 标准直接调拨单
+                case "DBSD02_SYS": return "ZJDB05_SYS"; // VMI调拨申请单 → VMI直接调拨单
+                case "DBSD03_SYS": return "ZJDB04_SYS"; // 库存调拨申请单 → 库存直接调拨单
+                default: return "ZJDB01_SYS";            // 未知类型回退到标准直接调拨单
+            }
+        }
+
+        /// <summary>
         /// 把调拨申请单 DynamicObject 组装成调拨单(STK_TransferDirect)保存请求
         /// </summary>
         public TransferDirectSaveRequestModel BuildTransferDirectRequest(DynamicObject billObj)
@@ -83,18 +101,19 @@ namespace Ben.HL.Bill.BusinessPlugIn
             // === 表头固定值 ===
             header.FID = 0; // 固定0：WMS回写时按新增保存
 
-            // === 单据类型：从调拨申请单 BillTypeId 取值 ===
-            string billTypeNumber = DynamicObjectHelper.GetBaseNumber(billObj, "BillTypeId");
-            header.FBillTypeID.FNumber = billTypeNumber;
+            // === 单据类型：调拨申请单 BillTypeId → 直接调拨单 FBillTypeID 映射 ===
+            // 两张单据的单据类型体系独立，编码不能直接复用，必须按映射表转换
+            string srcBillTypeNumber = DynamicObjectHelper.GetBaseNumber(billObj, "BillTypeId");
+            header.FBillTypeID.FNumber = MapToTransferDirectBillType(srcBillTypeNumber);
 
             // FBizType（业务类型）：直接从单据头 FBusinessType 取
-            header.FBizType = ReceiveBillPushService.GetValue(billObj, "FBusinessType");
+            header.FBizType = ReceiveBillPushService.GetValue(billObj, "BusinessType");
 
             // 调拨方向 FTransferDirect：从单据头取
             header.FTransferDirect = ReceiveBillPushService.GetValue(billObj, "FTransferDirect");
 
             // 调拨类型 FTransferBizType：从单据头取
-            header.FTransferBizType = ReceiveBillPushService.GetValue(billObj, "FTRANSTYPE");
+            header.FTransferBizType = ReceiveBillPushService.GetValue(billObj, "TRANSTYPE");
             header.FOwnerTypeOutIdHead = "BD_OwnerOrg";
             header.FOwnerTypeIdHead = "BD_OwnerOrg";
             header.FIsIncludedTax = true;
@@ -251,12 +270,12 @@ namespace Ben.HL.Bill.BusinessPlugIn
             entry.FMtoNo = ReceiveBillPushService.GetValue(row, "MtoNo");
 
             // 货主（分录）
-            entry.FOwnerOutId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "FStockOrgId", "StockOrgId");
-            entry.FOwnerId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "FStockOrgInId", "StockOrgInId");
+            entry.FOwnerOutId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "FOwnerId", "OwnerId");
+            entry.FOwnerId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "FOwnerInId", "OwnerInId");
 
             // 保管者
-            entry.FKeeperId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "KeeperId", "DestKeeperId");
-            entry.FKeeperOutId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "KeeperOutId", "SrcKeeperId");
+            entry.FKeeperId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "FOwnerInId", "OwnerInId");
+            entry.FKeeperOutId.FNumber = DynamicObjectHelper.GetBaseNumber(row, "FOwnerId", "OwnerId");
 
             // === 分录关联 (FBillEntry_Link) ===
             BuildEntryLink(billObj, row, entry);
@@ -294,5 +313,43 @@ namespace Ben.HL.Bill.BusinessPlugIn
             };
             entry.FBillEntry_Link.Add(link);
         }
+
+        #region 回填单据链接字段
+
+        /// <summary>
+        /// 根据 2010 仓在调拨申请单中的角色（调出/调入），回填 WMS 新生成的单号。
+        ///   2010 为调出仓 → 更新 FLKDELIVERYORDERID（出库关联）
+        ///   2010 为调入仓 → 更新 FLKENTRYORDERID（入库关联）
+        /// 直接拼 SQL 绕过 DynamicObject 只读校验，参照 ReceiveBillPushService.SaveFwmsstatus 的做法。
+        /// </summary>
+        /// <param name="ctx">金蝶上下文</param>
+        /// <param name="billId">调拨申请单表头 FID</param>
+        /// <param name="wmsNumber">WMS 返回的调拨单编号</param>
+        /// <param name="is2010Out">分录中存在 2010 作为调出仓</param>
+        /// <param name="is2010In">分录中存在 2010 作为调入仓</param>
+        public static void SaveTransferApplyWmsLinks(Context ctx, long billId, string wmsNumber,
+            bool is2010Out, bool is2010In)
+        {
+            if (ctx == null || billId <= 0 || string.IsNullOrWhiteSpace(wmsNumber)) return;
+            string safeNumber = wmsNumber.Replace("'", "''");
+
+            // 表头表：T_STK_STKTRANSFERAPP
+            if (is2010Out)
+            {
+                string sql = string.Format(
+                    "UPDATE T_STK_STKTRANSFERAPP SET FLKDELIVERYORDERID = N'{0}' WHERE FID = {1}",
+                    safeNumber, billId);
+                DBUtils.Execute(ctx, sql);
+            }
+            if (is2010In)
+            {
+                string sql = string.Format(
+                    "UPDATE T_STK_STKTRANSFERAPP SET FLKENTRYORDERID = N'{0}' WHERE FID = {1}",
+                    safeNumber, billId);
+                DBUtils.Execute(ctx, sql);
+            }
+        }
+
+        #endregion
     }
 }

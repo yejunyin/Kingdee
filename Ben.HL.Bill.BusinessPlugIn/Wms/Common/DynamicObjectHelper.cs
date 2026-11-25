@@ -24,7 +24,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 try
                 {
                     object val = source[fieldName];
-                    if (val is DynamicObject dyn) return dyn;
+                    var dyn = val as DynamicObject;
+                    if (dyn != null) return dyn;
                 }
                 catch
                 {
@@ -45,7 +46,8 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 try
                 {
                     object val = source[fieldName];
-                    if (val is DynamicObjectCollection col && col.Count > 0) return col;
+                    var col = val as DynamicObjectCollection;
+                    if (col != null && col.Count > 0) return col;
                 }
                 catch
                 {

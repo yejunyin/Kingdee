@@ -1,6 +1,7 @@
 using System;
 using System.Net.Http;
 using System.Text;
+using Newtonsoft.Json.Linq;
 
 namespace Ben.HL.Bill.BusinessPlugIn
 {
@@ -121,5 +122,60 @@ namespace Ben.HL.Bill.BusinessPlugIn
                 throw new Exception($"调用SRM接口异常: {ex.Message}", ex);
             }
         }
+
+        #region WMS 返回 JSON 通用解析
+
+        /// <summary>
+        /// 从 WMS 返回的 JSON 中解析出 Result.Number（新生成的单据编号）。
+        /// 兼容金蝶标准 Save 接口格式：{ "Result": { "ResponseStatus": { "IsSuccess": true, ... }, "Number": "xxx" } }
+        /// 优先顶层 Result.Number；兜底 SuccessEntitys[0].Number。
+        /// </summary>
+        public static string ParseResultNumber(string jsonResponse)
+        {
+            if (string.IsNullOrWhiteSpace(jsonResponse)) return null;
+            try
+            {
+                var json = JObject.Parse(jsonResponse);
+                var result = json["Result"];
+                if (result == null) return null;
+
+                string number = (string)result["Number"];
+                if (!string.IsNullOrWhiteSpace(number)) return number;
+
+                var successEntitys = result["ResponseStatus"]?["SuccessEntitys"] as JArray;
+                if (successEntitys != null && successEntitys.Count > 0)
+                {
+                    string entityNum = (string)successEntitys[0]["Number"];
+                    if (!string.IsNullOrWhiteSpace(entityNum)) return entityNum;
+                }
+            }
+            catch
+            {
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 从 WMS 返回 JSON 中解析 ResponseStatus.IsSuccess，判断接口是否执行成功。
+        /// </summary>
+        public static bool ParseIsSuccess(string jsonResponse)
+        {
+            if (string.IsNullOrWhiteSpace(jsonResponse)) return false;
+            try
+            {
+                var json = JObject.Parse(jsonResponse);
+                var respStatus = json["Result"]?["ResponseStatus"];
+                if (respStatus == null) return false;
+                var isSuccess = respStatus["IsSuccess"];
+                if (isSuccess == null) return false;
+                return (bool)isSuccess;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        #endregion
     }
 }

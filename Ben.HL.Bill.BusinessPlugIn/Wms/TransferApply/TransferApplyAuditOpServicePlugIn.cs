@@ -122,7 +122,44 @@ namespace Ben.HL.Bill.BusinessPlugIn
                     string response = _apiClient.PostJson(config.WmsTransferApplyApiUrl, jsonData);
                     _benLog.Info(string.Format("调拨申请单(操作服务)推送WMS返回 BillNo={0}：{1}", billNo, response));
 
-                    pushResults.Add(string.Format("✓ {0} 推送WMS成功", billNo));
+                    // 校验 WMS 返回的 IsSuccess
+                    bool isSuccess = WmsApiClient.ParseIsSuccess(response);
+                    if (!isSuccess)
+                    {
+                        pushResults.Add(string.Format("✗ {0} WMS返回失败：{1}", billNo, response));
+                        failCount++;
+                        continue;
+                    }
+
+                    // 解析 WMS 新生成的调拨单编号
+                    string wmsNumber = WmsApiClient.ParseResultNumber(response);
+                    if (string.IsNullOrWhiteSpace(wmsNumber))
+                    {
+                        pushResults.Add(string.Format("✗ {0} WMS成功但无法解析返回单号：{1}", billNo, response));
+                        failCount++;
+                        continue;
+                    }
+
+                    // 判断 2010 仓在本次调拨中的角色（调出/调入）
+                    bool is2010Out = false;
+                    bool is2010In = false;
+                    foreach (var row in svc.GetEntryRows(billObj))
+                    {
+                        var srcStock = DynamicObjectHelper.TryGetBaseData(row, "FStockId", "StockId", "SrcStockId");
+                        if (string.Equals(ReceiveBillPushService.GetValue(srcStock, "Number"), "2010", StringComparison.Ordinal))
+                            is2010Out = true;
+
+                        var destStock = DynamicObjectHelper.TryGetBaseData(row, "FStockInId", "StockInId", "DestStockId");
+                        if (string.Equals(ReceiveBillPushService.GetValue(destStock, "Number"), "2010", StringComparison.Ordinal))
+                            is2010In = true;
+                    }
+
+                    // 回填调拨申请单表头 FLK 链接字段
+                    long billId = DynamicObjectHelper.GetLong(billObj, "Id");
+                    TransferApplyPushService.SaveTransferApplyWmsLinks(
+                        this.Context, billId, wmsNumber, is2010Out, is2010In);
+
+                    pushResults.Add(string.Format("✓ {0} 推送WMS成功 → 调拨单 {1}", billNo, wmsNumber));
                     okCount++;
                 }
                 catch (Exception ex)

@@ -73,6 +73,7 @@
       <HintPath>$(KingdeeBin)\log4net2.dll</HintPath>
     </Reference>
     <Reference Include="Newtonsoft.Json">
+      <SpecificVersion>False</SpecificVersion>
       <HintPath>$(KingdeeBin)\Newtonsoft.Json.dll</HintPath>
     </Reference>
     <Reference Include="System" />
